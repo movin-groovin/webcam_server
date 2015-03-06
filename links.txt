@@ -8,3 +8,5 @@
 
 // fourcc = cv2.cv.CV_FOURCC(*'XVID')#cv2.VideoWriter_fourcc(*'XVID')
 // http://docs.opencv.org/trunk/doc/py_tutorials/py_gui/py_video_display/py_video_display.html
+
+// http://docs.opencv.org/modules/highgui/doc/user_interface.html
