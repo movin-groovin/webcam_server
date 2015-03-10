@@ -36,16 +36,19 @@ def ReadFromFile(file_name):
 	
 	
 def ReadFromFirstCamera():
+	#cv2.VideoCapture.set(cv2.)
+	#cv2.VideoCapture.set()
 	cap = cv2.VideoCapture(0)
 	while(True):
 		# Capture frame-by-frame
 		ret, frame = cap.read()
 
 		# Our operations on the frame come here
-		gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+		#gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 		#print 1
 		# Display the resulting frame
-		cv2.imshow('Video', frame)
+		cv2.namedWindow('flexible_window', 0)
+		cv2.imshow('flexible_window', frame)
 		if cv2.waitKey(1) & 0xFF == ord('q'):
 			break
 
@@ -62,7 +65,7 @@ def WriteToFile(file_name):
 	# Define the codec and create VideoWriter object
 	#fourcc = cv2.VideoWriter_fourcc(*'XVID')
 	fourcc = cv2.cv.CV_FOURCC(*'XVID')
-	out = cv2.VideoWriter(file_name,fourcc, 20.0, (640,480))
+	out = cv2.VideoWriter(file_name, fourcc, 20.0, (640,480))
 
 	while(cap.isOpened()):
 		ret, frame = cap.read()
@@ -70,7 +73,8 @@ def WriteToFile(file_name):
 			# write the flipped frame
 			out.write(frame)
 
-			cv2.imshow('frame',frame)
+			cv2.namedWindow('flexible_window', 0)
+			cv2.imshow('flexible_window',frame)
 			if cv2.waitKey(1) & 0xFF == ord('q'):
 				break
 		else:
@@ -78,7 +82,6 @@ def WriteToFile(file_name):
 
 	# Release everything if job is finished
 	cap.release()
-	out.release()
 	cv2.destroyAllWindows()
 	
 	return
