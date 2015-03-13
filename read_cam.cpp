@@ -15,6 +15,7 @@ cv::Mat MakeLinear (const cv::Mat & mat) {
 	return mat.reshape (0, 1);
 }
 
+
 cv::Mat RestoreFromBuff (unsigned char *buf, int orig_rows, int orig_cols) {
 	cv::Mat img = cv::Mat::zeros(orig_rows, orig_cols, CV_8UC3);
 	size_t offset = 0;
@@ -75,9 +76,10 @@ int main(int, char**)
         PrintImageInfo(edges);
         std::cout << "\n\n";
         
-        //cv::GaussianBlur(edges, edges, cv::Size(7,7), 1.5, 1.5);
-        //cv::Canny(edges, edges, 0, 30, 3);
-        cv::imshow("edges", img);
+        cv::GaussianBlur(edges, edges, cv::Size(7,7), 1.5, 1.5);
+        cv::Canny(edges, edges, 0, 30, 3);
+        //cv::imshow("edges", img);
+        cv::imshow("edges", edges);
         
         // create socket (host, port)
         
