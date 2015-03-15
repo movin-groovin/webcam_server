@@ -3,3 +3,4 @@ read_cam
 .idea
 net_cln
 net_srv
+*.o
