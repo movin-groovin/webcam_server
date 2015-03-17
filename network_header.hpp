@@ -20,19 +20,23 @@ struct REQUEST_HEADER {
 	union {
 		struct {
 			size_t size;
+			unsigned height; // rows
+			unsigned width;  // cols
 		};
 		size_t padd[8];
 	};
 } __attribute__((packed)); // just for example
 
 
-void FillHeader(REQUEST_HEADER &hdr, unsigned size) {
+void FillHeader(REQUEST_HEADER &hdr, unsigned size, unsigned height = 0, unsigned width = 0) {
 	std::fill_n(
 		reinterpret_cast<size_t*>(&hdr),
 		sizeof(REQUEST_HEADER) / sizeof(size_t),
 		0
 	);
 	hdr.size = size;
+	hdr.height = height;
+	hdr.width = width;
 	
 	return;
 }
@@ -48,7 +52,7 @@ bool CheckError (boost::system::error_code & err_code) {
 
 
 template <typename SockType>
-boost::asio::mutable_buffer ReadDataPart (SockType &sock) {
+boost::asio::mutable_buffer ReadDataPart (SockType &sock, unsigned &height, unsigned &width) {
 	size_t num;
 	REQUEST_HEADER hdr;
 	boost::system::error_code err_code;
@@ -58,6 +62,8 @@ boost::asio::mutable_buffer ReadDataPart (SockType &sock) {
 	if (!CheckError(err_code)) {
 		return boost::asio::mutable_buffer();
 	}
+	height = hdr.height;
+	width = hdr.width;
 	
 	boost::asio::mutable_buffers_1 data_buf =
 			boost::asio::buffer(new unsigned char [hdr.size + sizeof (size_t)], hdr.size);
@@ -72,12 +78,12 @@ boost::asio::mutable_buffer ReadDataPart (SockType &sock) {
 
 
 template <typename SockType>
-size_t WriteDataPart (SockType &sock, const void *data, size_t n) {
+size_t WriteDataPart (SockType &sock, const void *data, size_t n, unsigned height, unsigned width) {
 	size_t num;
 	REQUEST_HEADER hdr;
 	boost::system::error_code err_code;
 	
-	FillHeader(hdr, n);
+	FillHeader(hdr, n, height, width);
 	boost::asio::write(sock, boost::asio::buffer(&hdr, sizeof (hdr)), err_code);
 	if (!CheckError(err_code)) {
 		return 0;
@@ -92,13 +98,6 @@ size_t WriteDataPart (SockType &sock, const void *data, size_t n) {
 }
 
 
-std::string GetData() {
-	std::string buf;
-	std::getline(std::cin, buf, '\n');
-	return buf;
-}
-
-
 size_t completion_condition(const boost::system::error_code &err, size_t num) {
 	std::cout << err << " ------ " << num << '\n';
 	
@@ -107,6 +106,17 @@ size_t completion_condition(const boost::system::error_code &err, size_t num) {
 	return 1;
 }
 
+// ===============================================================
+// ======================== OPENCV FUNCS =========================
+// ===============================================================
+cv::Mat MakeLinear (const cv::Mat & mat) {
+	return mat.reshape (0, 1);
+}
+
+
+size_t GetMatSize(cv::Mat *frame) {
+	return frame->rows * frame->cols * frame->channels();
+}
 
 
 #endif // HEADERS_FOR_NETWORK

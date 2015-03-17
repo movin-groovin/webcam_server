@@ -11,6 +11,25 @@ using boost::asio::ip::tcp;
 
 
 
+cv::Mat RestoreFromBuff (unsigned char *buf, int orig_rows, int orig_cols) {
+	cv::Mat img = cv::Mat::zeros(orig_rows, orig_cols, CV_8UC3);
+	size_t offset = 0;
+	
+	for (int i = 0;  i < img.rows; i++) {
+		for (int j = 0; j < img.cols; j++) {
+			img.at<cv::Vec3b>(i,j) = cv::Vec3b(
+				buf[offset + 0],
+				buf[offset + 1],
+				buf[offset + 2]
+			);
+			offset += 3;
+		}
+	}
+	
+	return img;
+}
+
+
 int main (int argc, char **argv) {
 	std::string host = "127.0.0.1";
 	std::string port = "54321";
@@ -34,28 +53,24 @@ int main (int argc, char **argv) {
 		boost::system::error_code err_code;
 		
 		boost::asio::connect(sock, iter);
-		//sock.non_blocking(false); 
+		cv::namedWindow("edges", 1);
 		
 		for (;;) {
-			boost::asio::mutable_buffers_1 buf (ReadDataPart(sock));
+			unsigned height, width;
+			boost::asio::mutable_buffers_1 buf (ReadDataPart(sock, height, width));
 			char *mem = boost::asio::buffer_cast<char*> (buf);
-			size_t len = boost::asio::buffer_size(buf);		
+			size_t len = boost::asio::buffer_size(buf);	
+			
 			if (!len) {
 				delete [] mem;
-				std::cout << "Cln out 1\n";
+				std::cout << "Cln out\n";
 				break;
 			}
-			mem[len] = '\0';
-			std::cout << mem << std::endl;
+			cv::Mat img = RestoreFromBuff(reinterpret_cast<unsigned char*>(mem), height, width);
 			delete [] mem;
 			
-			
-			std::string data = GetData();
-			len = WriteDataPart(sock, &std::vector<char>(data.begin(), data.end())[0], data.size());
-			if (len != data.size()) {
-				std::cout << "Cln out 2\n";
-				break;
-			}
+			cv::imshow("edges", img);
+			cv::waitKey(25);
 		}
 	}
 	catch (std::exception &e) {

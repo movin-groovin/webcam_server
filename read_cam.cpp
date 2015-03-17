@@ -42,7 +42,7 @@ void PrintImageInfo(const cv::Mat & frame) {
 	std::cout << "Channels: " << frame.channels() << std::endl;
 	std::cout << "Continuous: : " << static_cast<bool>(frame.flags & cv::Mat::CONTINUOUS_FLAG) << std::endl;
 	std::cout << "Size: " << (frame.rows * frame.cols * frame.channels() / 1024) << " KB\n";
-	
+	std::cout << "Rows: " << frame.rows << " Cols: " << frame.cols<< '\n';
 	std::cout << "==========================================================================\n";
 	
 	return;
@@ -69,11 +69,11 @@ int main(int, char**)
         PrintImageInfo(frame);
         cv::Mat new_frame = MakeLinear(frame);
         cv::Mat img = RestoreFromBuff(new_frame.data, frame.rows, frame.cols);
-		PrintImageInfo(new_frame);
-        PrintImageInfo(img);
+		//PrintImageInfo(new_frame);
+        //PrintImageInfo(img);
         
         cv::cvtColor(img, edges, CV_BGR2GRAY);
-        PrintImageInfo(edges);
+        //PrintImageInfo(edges);
         std::cout << "\n\n";
         
         cv::GaussianBlur(edges, edges, cv::Size(7,7), 1.5, 1.5);
