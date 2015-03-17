@@ -37,23 +37,22 @@ int main (int argc, char **argv) {
 		//sock.non_blocking(false); 
 		
 		for (;;) {
-			size_t len = read(sock, boost::asio::buffer(buf), &completion_condition, err_code);
-			
-			if (!CheckError(err_code)) {
-				if (len) {
-					std::cout.write(buf.data(), len);
-					std::cout << std::endl;
-				}
+			boost::asio::mutable_buffers_1 buf (ReadDataPart(sock));
+			char *mem = boost::asio::buffer_cast<char*> (buf);
+			size_t len = boost::asio::buffer_size(buf);		
+			if (!len) {
+				delete [] mem;
 				std::cout << "Cln out 1\n";
 				break;
 			}
+			mem[len] = '\0';
+			std::cout << mem << std::endl;
+			delete [] mem;
 			
-			std::cout.write(buf.data(), len);
-			std::cout << std::endl;
 			
 			std::string data = GetData();
-			boost::asio::write (sock, boost::asio::buffer(data), err_code);
-			if (!CheckError(err_code)) {
+			len = WriteDataPart(sock, &std::vector<char>(data.begin(), data.end())[0], data.size());
+			if (len != data.size()) {
 				std::cout << "Cln out 2\n";
 				break;
 			}

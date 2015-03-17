@@ -3,8 +3,10 @@
 
 CC = g++
 
-CFLAGS = -c -Wall -pedantic -std=c++11 -I/usr/include/opencv2 -I/usr/local/include/boost
-LFLAGS = -L/usr/local/lib/boost/dynamic/ -lboost_system-gcc47-mt-1_56 -lopencv_highgui -lopencv_core -lopencv_imgproc
+CFLAGS = -I/usr/include/opencv2 -I/usr/local/include/boost-1_57
+CFLAGS += -c -pedantic -std=c++11 -Wno-reorder -Wno-switch -O2 -Wall
+LFLAGS = -L/usr/local/lib/boost1_57
+LFLAGS += -lboost_system-gcc47-mt-1_57 -lopencv_highgui -lopencv_core -lopencv_imgproc
 
 
 
