@@ -10,19 +10,19 @@ LFLAGS += -lboost_system-gcc47-mt-1_57 -lopencv_highgui -lopencv_core -lopencv_i
 
 
 
-all: net_srv net_cln
+all: as_srv s_cln
 
-net_srv: net_srv.o
-	$(CC) $(LFLAGS) net_srv.o -o net_srv
+as_srv: as_srv.o
+	$(CC) $(LFLAGS) as_srv.o -o as_srv
 
-net_cln: net_cln.o
-	$(CC) $(LFLAGS) net_cln.o -o net_cln
+s_cln: s_cln.o
+	$(CC) $(LFLAGS) s_cln.o -o s_cln
 
-net_srv.o: net_srv.cpp network_header.hpp
-	$(CC) $(CFLAGS) net_srv.cpp
+as_srv.o: as_srv.cpp async.hpp
+	$(CC) $(CFLAGS) as_srv.cpp
 
-net_cln.o: net_cln.cpp network_header.hpp
-	$(CC) $(CFLAGS) net_cln.cpp
+s_cln.o: s_cln.cpp async.hpp
+	$(CC) $(CFLAGS) s_cln.cpp
 
 
 clean:

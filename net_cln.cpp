@@ -70,7 +70,7 @@ int main (int argc, char **argv) {
 			delete [] mem;
 			
 			cv::imshow("edges", img);
-			cv::waitKey(25);
+			cv::waitKey(1);
 		}
 	}
 	catch (std::exception &e) {

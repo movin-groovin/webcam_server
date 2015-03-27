@@ -67,7 +67,8 @@ int main (int argc, char **argv) {
 					break;
 				}
 				
-				cv::waitKey(25);
+				//cv::waitKey(25);
+				usleep (25);
 			}
 			//
 		}
