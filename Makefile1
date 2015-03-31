@@ -6,7 +6,7 @@ CC = g++
 CFLAGS = -I/usr/include/opencv2 -I/usr/local/include/boost-1_57
 CFLAGS += -c -pedantic -std=c++11 -Wno-reorder -Wno-switch -O2 -Wall
 LFLAGS = -L/usr/local/lib/boost1_57/shared
-LFLAGS += -lboost_system-gcc47-mt-1_57 -lopencv_highgui -lopencv_core -lopencv_imgproc
+LFLAGS += -lboost_system-gcc47-mt-1_57 -lboost_thread-gcc47-mt-1_57 -lopencv_highgui -lopencv_core -lopencv_imgproc
 
 
 

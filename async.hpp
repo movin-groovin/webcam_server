@@ -13,6 +13,11 @@
 #include <boost/shared_ptr.hpp>
 #include <boost/enable_shared_from_this.hpp>
 #include <boost/asio.hpp>
+#include <boost/thread.hpp>
+
+
+using namespace boost::asio::ip;
+using namespace boost::asio;
 
 
 

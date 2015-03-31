@@ -3,9 +3,6 @@
 
 
 
-using boost::asio::ip::tcp;
-
-
 int main(int argc, char* argv[]) {
 	try {
 		if (argc != 2) {
@@ -13,12 +10,10 @@ int main(int argc, char* argv[]) {
 			return 1;
 		}
 		
-		boost::asio::io_service io_service;
+		io_service io_service;
 		tcp::resolver resolver(io_service);
-		tcp::resolver::query query(argv[1], "daytime");
-		tcp::resolver::iterator endpoint_iterator = resolver.resolve(query);
 		tcp::socket socket(io_service);
-		boost::asio::connect(socket, boost::asio::ip::tcp::endpoint (boost::asio::ip::address::from_string("127.0.0.1"), 8899));
+		socket.connect(tcp::endpoint (address::from_string("127.0.0.1"), 8899));
 		
 		for (;;) {
 			boost::array<char, 128> buf;
