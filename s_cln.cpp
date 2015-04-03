@@ -56,7 +56,10 @@ int main(int argc, char* argv[]) {
 			cv::Mat img = Frames::RestoreFromBuff (&data[0], rows, cols);
 			
 			cv::imshow("edges", img);
-			cv::waitKey(1);
+			if ('q' == cv::waitKey(1)) {
+				std::cout << "Bye bye\n";
+				break;
+			}
 		}
 	}
 	catch (std::exception& e) {
