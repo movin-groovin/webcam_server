@@ -4,3 +4,6 @@ read_cam
 net_cln
 net_srv
 *.o
+*.pro.user
+s_cln
+as_srv

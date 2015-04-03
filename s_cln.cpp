@@ -1,31 +1,62 @@
 
-#include "async.hpp"
+#include "net.hpp"
+#include "cam.hpp"
 
+
+
+void ReadData(tcp::socket &sock, std::vector<unsigned char> &data, int &rows, int &cols) {
+	boost::system::error_code error;
+	std::vector<char> hdr_buf(sizeof (NetThings::REQUEST_HEADER));
+	NetThings::REQUEST_HEADER msg_hdr;
+	
+	
+	boost::asio::read(sock, boost::asio::buffer(hdr_buf), error);
+	if (error) {
+		std::cout << "Have caught an error at header reading: " << error.message() << std::endl;
+		throw boost::system::system_error(error);
+	}
+	std::copy(hdr_buf.begin(), hdr_buf.end(), reinterpret_cast<char*> (&msg_hdr));
+	
+	if (msg_hdr.u.s.size > data.size()) {
+		data.resize(msg_hdr.u.s.size);
+	}
+	boost::asio::read(sock, boost::asio::buffer(data), error);
+	if (error) {
+		std::cout << "Have caught an error at header reading: " << error.message() << std::endl;
+		throw boost::system::system_error(error);
+	}
+	
+	rows = msg_hdr.u.s.height;
+	cols = msg_hdr.u.s.width;
+	
+	//std::cout << "size: " << data.size() << "; rows: " << rows << "; cols: " << cols << std::endl;
+	
+	
+	return;
+}
 
 
 int main(int argc, char* argv[]) {
 	try {
 		if (argc != 2) {
 			std::cerr << "Usage: client <host>" << std::endl;
-			return 1;
+			return 1001;
 		}
 		
 		io_service io_service;
 		tcp::resolver resolver(io_service);
 		tcp::socket socket(io_service);
 		socket.connect(tcp::endpoint (address::from_string("127.0.0.1"), 8899));
+		cv::namedWindow("edges", 1);
 		
+		std::vector<unsigned char> data;
+		int rows, cols;
 		for (;;) {
-			boost::array<char, 128> buf;
-			boost::system::error_code error;
-			size_t len = socket.read_some(boost::asio::buffer(buf), error);
+			ReadData(socket, data, rows, cols);
+			cv::Mat img = Frames::RestoreFromBuff (&data[0], rows, cols);
 			
-			if (error == boost::asio::error::eof)
-				break; // Connection closed cleanly by peer.
-			else if (error)
-				throw boost::system::system_error(error); // Some other error.
-			
-			std::cout.write(buf.data(), len);
+			cv::imshow("edges", img);
+			cv::waitKey(1);
 		}
 	}
 	catch (std::exception& e) {
