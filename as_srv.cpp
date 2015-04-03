@@ -4,24 +4,75 @@
 
 
 
+class CLogger: boost::noncopyable {
+public:
+	void OpenLog(const std::string &path) {
+		m_path = path;
+		
+		if (!m_ofs.is_open()) {
+			m_ofs.open(m_path, std::ios_base::out | std::ios_base::app);
+			if (!m_ofs.is_open())
+				throw std::runtime_error("Can't open log file: " + m_path);
+		}
+		
+		return;
+	}
+
+	virtual void PutToLog(const std::string &msg) {
+		assert(!m_path.empty());
+		assert(m_ofs.is_open());
+		
+		m_ofs << msg << "\n";
+		
+		return;
+	}
+	
+	static CLogger& GetLogger() {
+		static CLogger logger;
+		return logger;
+	}
+	
+private:
+	CLogger(){}
+	
+	std::string m_path;
+	std::ofstream m_ofs;
+};
+
+
+
 class CTcpConnection: public boost::enable_shared_from_this<CTcpConnection> {
 public:
 	typedef boost::shared_ptr<CTcpConnection> Pointer;
 	
-	static Pointer Create(
-		boost::asio::io_service& io_service,
-		std::shared_ptr <CTcpServer> serv
-	)
+	static Pointer Create(boost::asio::io_service& io_service)
 	{
-		return Pointer(new CTcpConnection(io_service, serv));
+		return Pointer(new CTcpConnection(io_service));
 	}
 	
 	tcp::socket& Socket() {
 		return m_socket;
 	}
 	
+	void WriteError(const boost::system::error_code &error) {
+		std::ostringstream oss;
+		
+		oss << error.value();
+		std::string msg = "Boost asio error code: " + oss.str() + "; message: " + error.message();
+		CLogger::GetLogger().PutToLog(msg);
+		
+		return;
+	}
+	
+
 	void SendData(Frames::CWebcam &cam) {
-		cam.GetData(m_data);
+		try {
+			cam.GetData(m_data);
+		} catch (std::exception &exc) {
+			WriteError(exc.what());
+			MarkBad();
+			return;
+		}
 		
 		NetThings::REQUEST_HEADER hdr;
 		NetThings::FillHeader(hdr, m_data.size(), cam.GetHeight(), cam.GetWidth());
@@ -31,33 +82,72 @@ public:
 		return;
 	}
 	
-	virtual void WriteError(const boost::system::error_code &error) {
-		std::cout << "Boost asio error code: " << error << std::endl;
+	void WriteError(const std::string &msg) {
+		CLogger::GetLogger().PutToLog(msg);
+		return;
+	}
+	
+	bool IsBad() {
+		boost::mutex::scoped_lock lock(m_synch);
+		return m_bad_connection;
 	}
 	
 	virtual ~CTcpConnection() {}
 	
 private:
 	CTcpConnection(
-		boost::asio::io_service& io_service,
-		std::shared_ptr <CTcpServer> serv
+		boost::asio::io_service& io_service
 		):
 			m_socket(io_service),
-			m_serv(serv)
+			m_bad_connection(false)
 		{}
 	
 	void SendAsyncHeader(NetThings::REQUEST_HEADER &hdr) {
-		std::vector<char> hdr_buf(sizeof hdr);
-		std::copy(
-			reinterpret_cast<char*>(&hdr),
-			reinterpret_cast<char*>(&hdr) + sizeof hdr,
-			hdr_buf.begin()
-		);
+		try {
+			std::vector<char> hdr_buf(sizeof hdr);
+			
+			std::copy(
+				reinterpret_cast<char*>(&hdr),
+				reinterpret_cast<char*>(&hdr) + sizeof hdr,
+				hdr_buf.begin()
+			);
+			boost::asio::async_write(
+				m_socket,
+				boost::asio::buffer(hdr_buf),
+				std::bind(
+					&CTcpConnection::OnSentHeader,
+					shared_from_this(),
+					std::placeholders::_1,
+					std::placeholders::_2
+				)
+			);
+		} catch (std::exception &exc)
+		{
+			WriteError(exc.what());
+			MarkBad();
+			
+			return;
+		}
+		
+		return;
+	}
+	
+	void OnSentHeader(
+		const boost::system::error_code &error,
+		size_t bytes_num_transf
+	)
+	{
+		if (error) {
+			WriteError(error);
+			MarkBad();
+			return;
+		}
+		
 		boost::asio::async_write(
 			m_socket,
-			boost::asio::buffer(hdr_buf),
+			boost::asio::buffer(m_data),
 			std::bind(
-				&CTcpConnection::OnSentHeader,
+				&CTcpConnection::HandleWrite,
 				shared_from_this(),
 				std::placeholders::_1,
 				std::placeholders::_2
@@ -66,18 +156,29 @@ private:
 		
 		return;
 	}
+
+	void HandleWrite(
+		const boost::system::error_code& error,
+		size_t /*bytes_transferred*/)
+	{
+		if (error) {
+			WriteError(error);
+			MarkBad();
+		}
+		
+		return;
+	}
 	
-	void HandleWrite(const boost::system::error_code& error, size_t /*bytes_transferred*/);
-	
-	void OnSentHeader(
-		const boost::system::error_code &error,
-		size_t bytes_num_transf
-	);
+	void MarkBad() {
+		boost::mutex::scoped_lock lock(m_synch);
+		m_bad_connection = true;
+	}
 	
 private:
 	tcp::socket m_socket;
 	std::vector<char> m_data;
-	std::shared_ptr <CTcpServer> m_serv;
+	boost::mutex m_synch;
+	bool m_bad_connection;
 };
 
 //--------------------------------------------------------------------
@@ -94,7 +195,7 @@ public:
 		std::for_each(
 			m_connections.begin(),
 			m_connections.end(),
-			[&cam](CTcpConnection::Pointer p) { p->SendData(cam); }
+			[&cam](CTcpConnection::Pointer p) { if (!p->IsBad()) p->SendData(cam); }
 		);
 		
 		return;
@@ -108,7 +209,7 @@ public:
 	void StartAccept()
 	{
 		CTcpConnection::Pointer new_connection =
-			CTcpConnection::Create(m_acceptor.get_io_service(), shared_from_this());
+			CTcpConnection::Create(m_acceptor.get_io_service());
 			
 		m_acceptor.async_accept(
 			new_connection->Socket(),
@@ -120,6 +221,15 @@ public:
 			)
 		);
 		
+		return;
+	}
+	
+	void ClearBadConnections() {
+		auto end = m_connections.end();
+		for (auto i = m_connections.begin(); i != end; ++i) {
+			if ((*i)->IsBad())
+				m_connections.remove(*i);
+		}
 		return;
 	}
 	
@@ -150,54 +260,20 @@ private:
 	int m_port;
 };
 
-//--------------------------------------------------------------------
 
-void CTcpConnection::OnSentHeader(
-	const boost::system::error_code &error,
-	size_t bytes_num_transf
-)
-{
-	if (error) {
-		WriteError(error);
-		m_serv->RemoveConnection(shared_from_this());
-	}
-	
-	boost::asio::async_write(
-		m_socket,
-		boost::asio::buffer(m_data),
-		std::bind(
-			&CTcpConnection::HandleWrite,
-			shared_from_this(),
-			std::placeholders::_1,
-			std::placeholders::_2
-		)
-	);
-	
-	return;
-}
-
-//--------------------------------------------------------------------
-
-void CTcpConnection::HandleWrite(
-	const boost::system::error_code& error,
-	size_t /*bytes_transferred*/)
-{
-	if (error) {
-		WriteError(error);
-		m_serv->RemoveConnection(shared_from_this());
-	}
-	
-	return;
-}
-
-//--------------------------------------------------------------------
 
 int main() {
-	const unsigned thr_number = 5;
-	const unsigned milisec_sleep = 10;
+	unsigned thr_number = 5;
+	unsigned milisec_sleep = 10;
 	const int port = 8899;
+	const unsigned max_connections = 100;
+	const std::string log = "async_log.txt";
+	std::string config = "conf.txt";
+	std::unordered_map <std::string, std::string> user_data;
+	user_data["one"] = "two";
 	
 	try {
+		CLogger::GetLogger().OpenLog(log);
 		boost::thread_group thr_grp;
 		boost::asio::io_service io_service;
 		std::shared_ptr<CTcpServer> server(CTcpServer::MakeTcpServer(io_service, port));
@@ -212,6 +288,7 @@ int main() {
 		
 		while (true)
 		{
+			server->ClearBadConnections();
 			first_cam.RefreshFrame();
 			server->NotifyClients(first_cam);
 			boost::this_thread::sleep(boost::posix_time::millisec(milisec_sleep));

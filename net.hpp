@@ -5,10 +5,14 @@
 
 
 #include <ctime>
+#include <cassert>
+
 #include <iostream>
 #include <string>
 #include <list>
 #include <memory>
+#include <fstream>
+#include <unordered_map>
 
 #include <boost/array.hpp>
 #include <boost/bind.hpp>
