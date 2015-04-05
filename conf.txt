@@ -1,0 +1,9 @@
+
+# a comment string
+
+max_connections = 100
+worker_threads_number = 10
+port = 9988
+
+auth = admin:fuck_Puck_1991
+auth = user:OppaHello981

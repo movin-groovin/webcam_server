@@ -4,6 +4,102 @@
 
 
 
+class CConfig {
+public:
+	static CConfig& GetConfig() {
+		static CConfig obj;
+		return obj;
+	}
+	
+	unsigned m_max_connections;
+	unsigned m_port;
+	unsigned m_max_threads;
+	std::unordered_map<std::string, std::string> m_auth_info;
+	
+private:
+	CConfig():
+		m_max_connections(0),
+		m_port(-1),
+		m_max_threads(0),
+		m_auth_info(1024),
+		m_read(false)
+	{
+		int ret;
+		if ((ret = pthread_rwlock_init(&m_synch, nullptr))) {
+			throw std::runtime_error(ErrorToString(ret));
+		}
+		
+		return;
+	}
+	
+	virtual ~ CConfig() {
+		pthread_rwlock_destroy(&m_synch);
+	}
+	
+	void CaptureLock() {
+#ifdef MY_OWN_DEBUG_1
+		int ret;
+		if (ret = pthread_rwlock_rdlock(&m_rwlock))
+		{
+			throw std::logic_error(ErrorToString(ret));
+		}
+#else
+		pthread_rwlock_rdlock(&m_rwlock);
+#endif
+		
+		if (dat.size() < m_data.size()) {
+			try {
+				dat.resize(m_data.size());
+			} catch (...) {
+				pthread_rwlock_unlock(&m_rwlock);
+				throw;
+			}
+		}
+		std::copy(m_data.begin(), m_data.end(), dat.begin());
+		
+		pthread_rwlock_unlock(&m_rwlock);
+	}
+	
+	void ReleaseLock {
+		pthread_rwlock_unlock(&m_rwlock);
+	}
+	
+	void Read () {
+#ifdef MY_OWN_DEBUG_1
+		int ret;
+		if (ret = pthread_rwlock_wrlock(&m_rwlock))
+		{
+			throw std::logic_error(ErrorToString(ret));
+		}
+#else
+		pthread_rwlock_wrlock(&m_rwlock);
+#endif
+		try {
+			DoRead();
+		} catch (...) {
+			pthread_rwlock_unlock(&m_rwlock);
+			throw;
+		}
+		pthread_rwlock_unlock(&m_rwlock);
+	}
+	
+	unsigned m_max_connections;
+	unsigned m_port;
+	unsigned m_max_threads;
+	std::unordered_map<std::string, std::string> m_auth_info;
+	
+	std::string m_path;
+	bool m_read;
+	
+	pthread_rwlock_t m_synch;
+};
+
+void CConfig::DoRead() {
+	return;
+}
+
+
+
 class CLogger: boost::noncopyable {
 public:
 	void OpenLog(const std::string &path) {
@@ -75,6 +171,13 @@ public:
 		return;
 	}
 	
+	bool IsBad() {
+		bool ret_val;
+		boost::mutex::scoped_lock lock(m_synch);
+		ret_val = m_bad_connection;
+		return ret_val;
+	}
+	
 	virtual ~CTcpConnection() {}
 	
 private:
@@ -100,6 +203,7 @@ private:
 	);
 	
 	void MarkBad() {
+		boost::mutex::scoped_lock lock(m_synch);
 		m_bad_connection = true;
 	}
 	
@@ -107,6 +211,7 @@ private:
 	tcp::socket m_socket;
 	std::vector<char> m_data;
 	std::shared_ptr<CTcpServer> m_serv;
+	boost::mutex m_synch;
 	bool m_bad_connection;
 };
 

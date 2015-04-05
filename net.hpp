@@ -35,12 +35,61 @@ class CTcpServer;
 namespace NetThings {
 
 
+enum Commands {
+	LowCommand = 0
+	Frame,
+	Service,
+	NewCommand,
+	HighCommand
+};
+
+inline bool CheckCommand(unsigned cmd) {
+	return cmd >= LowCommand && cmd <= HighCommand;
+}
+
+
+enum Statuses {
+	LowStatus = 0,
+	Success,
+	Error,
+	NewStatus,
+	HighStatus
+};
+
+inline bool CheckStatus(unsigned cmd) {
+	return cmd >= LowStatus && cmd <= HighStatus;
+}
+
+
+enum ExtraStatus {
+	LowExtraStatus = 0,
+	NewExtraStatus,
+	HighExtraStatus
+}
+
+inline bool CheckExtraStatus(unsigned cmd) {
+	return cmd >= LowExtraStatus && cmd <= HighExtraStatus;
+}
+
+
+const unsigned MinDataSize = 0;
+const unsigned MaxDataSize = 1024*1024;
+const unsigned MinFrameHeight = 0;
+const unsigned MaxFrameHeight = 2000;
+const unsigned MinFrameWidth = 0;
+const unsigned MaxFrameWidth = 2000;
+
+
+
 struct REQUEST_HEADER {
 	union {
 		struct {
 			size_t size;
 			unsigned height; // rows
 			unsigned width;  // cols
+			unsigned command;
+			unsigned status;
+			unsigned extra_status;
 		} s;
 		size_t padd[8];
 	} u;
@@ -59,6 +108,10 @@ void FillHeader(REQUEST_HEADER &hdr, unsigned size, unsigned height = 0, unsigne
 	
 	return;
 }
+
+
+
+
 
 
 } // NetThings

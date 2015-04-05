@@ -17,19 +17,23 @@ void ReadData(tcp::socket &sock, std::vector<unsigned char> &data, int &rows, in
 	}
 	std::copy(hdr_buf.begin(), hdr_buf.end(), reinterpret_cast<char*> (&msg_hdr));
 	
+	if (!Commands::CheckInvariantHeader(msg_hdr)) {
+		std::string msg = "Msg header doesn't comply with invariant";
+		std::cout << msg + "\n";
+		throw std::runtime_error(msg);
+	}
+	
 	if (msg_hdr.u.s.size > data.size()) {
 		data.resize(msg_hdr.u.s.size);
 	}
 	boost::asio::read(sock, boost::asio::buffer(data), error);
 	if (error) {
-		std::cout << "Have caught an error at header reading: " << error.message() << std::endl;
+		std::cout << "Have caught an error at data reading: " << error.message() << std::endl;
 		throw boost::system::system_error(error);
 	}
 	
 	rows = msg_hdr.u.s.height;
 	cols = msg_hdr.u.s.width;
-	
-	//std::cout << "size: " << data.size() << "; rows: " << rows << "; cols: " << cols << std::endl;
 	
 	
 	return;
