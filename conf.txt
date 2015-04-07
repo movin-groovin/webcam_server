@@ -7,3 +7,5 @@ port = 9988
 
 auth = admin:fuck_Puck_1991
 auth = user:OppaHello981
+
+log_file = async_log.txt

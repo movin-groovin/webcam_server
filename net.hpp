@@ -12,7 +12,6 @@
 #include <list>
 #include <memory>
 #include <fstream>
-#include <unordered_map>
 
 #include <boost/array.hpp>
 #include <boost/bind.hpp>
@@ -36,9 +35,10 @@ namespace NetThings {
 
 
 enum Commands {
-	LowCommand = 0
+	LowCommand = 0,
 	Frame,
 	Service,
+	AuthData,
 	NewCommand,
 	HighCommand
 };
@@ -51,6 +51,7 @@ inline bool CheckCommand(unsigned cmd) {
 enum Statuses {
 	LowStatus = 0,
 	Success,
+	AuthSuccess,
 	Error,
 	NewStatus,
 	HighStatus
@@ -65,7 +66,7 @@ enum ExtraStatus {
 	LowExtraStatus = 0,
 	NewExtraStatus,
 	HighExtraStatus
-}
+};
 
 inline bool CheckExtraStatus(unsigned cmd) {
 	return cmd >= LowExtraStatus && cmd <= HighExtraStatus;
@@ -96,20 +97,9 @@ struct REQUEST_HEADER {
 } __attribute__((packed)); // just for example
 
 
-void FillHeader(REQUEST_HEADER &hdr, unsigned size, unsigned height = 0, unsigned width = 0) {
-	std::fill_n(
-		reinterpret_cast<size_t*>(&hdr),
-		sizeof(REQUEST_HEADER) / sizeof(size_t),
-		0
-	);
-	hdr.u.s.size = size;
-	hdr.u.s.height = height;
-	hdr.u.s.width = width;
-	
-	return;
-}
+void FillHeader(REQUEST_HEADER &hdr, unsigned size, unsigned height = 0, unsigned width = 0);
 
-
+bool CheckInvariantHeader(const REQUEST_HEADER &hdr);
 
 
 

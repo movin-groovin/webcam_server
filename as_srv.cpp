@@ -2,6 +2,10 @@
 #include "net.hpp"
 #include "cam.hpp"
 
+#include <unordered_map>
+
+#include <boost/regex.hpp>
+
 
 
 class CConfig {
@@ -11,10 +15,39 @@ public:
 		return obj;
 	}
 	
-	unsigned m_max_connections;
-	unsigned m_port;
-	unsigned m_max_threads;
-	std::unordered_map<std::string, std::string> m_auth_info;
+	void Read (const std::string &path) {
+		m_path = path;
+		CaptureLock();
+		try {
+			DoRead();
+		} catch (...) {
+			ReleaseLock();
+			throw;
+		}
+		ReleaseLock();
+	}
+	
+	unsigned GetPort () const {
+		return m_port;
+	}
+	unsigned GetMaxThreads () const {
+		return m_max_threads;
+	}
+	unsigned GetMaxConnections () const {
+		return m_max_connections;
+	}
+	std::string GetLogPath() const {
+		return m_log_file;
+	}
+	bool CheckAuth(const std::string &name, const std::string &pass) const {
+		std::unordered_map<std::string, std::string>::const_iterator it = m_auth_info.find(name);
+		
+		if (it == m_auth_info.end()) {
+			return false;
+		}
+		
+		return it->second == pass;
+	}
 	
 private:
 	CConfig():
@@ -39,53 +72,31 @@ private:
 	void CaptureLock() {
 #ifdef MY_OWN_DEBUG_1
 		int ret;
-		if (ret = pthread_rwlock_rdlock(&m_rwlock))
+		if (ret = pthread_rwlock_rdlock(&m_synch))
 		{
 			throw std::logic_error(ErrorToString(ret));
 		}
 #else
-		pthread_rwlock_rdlock(&m_rwlock);
+		pthread_rwlock_rdlock(&m_synch);
 #endif
-		
-		if (dat.size() < m_data.size()) {
-			try {
-				dat.resize(m_data.size());
-			} catch (...) {
-				pthread_rwlock_unlock(&m_rwlock);
-				throw;
-			}
-		}
-		std::copy(m_data.begin(), m_data.end(), dat.begin());
-		
-		pthread_rwlock_unlock(&m_rwlock);
 	}
 	
-	void ReleaseLock {
-		pthread_rwlock_unlock(&m_rwlock);
+	void ReleaseLock() {
+		pthread_rwlock_unlock(&m_synch);
 	}
 	
-	void Read () {
-#ifdef MY_OWN_DEBUG_1
-		int ret;
-		if (ret = pthread_rwlock_wrlock(&m_rwlock))
-		{
-			throw std::logic_error(ErrorToString(ret));
-		}
-#else
-		pthread_rwlock_wrlock(&m_rwlock);
-#endif
-		try {
-			DoRead();
-		} catch (...) {
-			pthread_rwlock_unlock(&m_rwlock);
-			throw;
-		}
-		pthread_rwlock_unlock(&m_rwlock);
-	}
+	void DoRead();
+	
+	unsigned ExtractValue(const std::string &data, const std::string &pattern);
+	
+	std::string ExtractString(const std::string &data, const std::string &pattern);
+	
+	void ExtraxtAuthData(const std::string &data);
 	
 	unsigned m_max_connections;
 	unsigned m_port;
 	unsigned m_max_threads;
+	std::string m_log_file;
 	std::unordered_map<std::string, std::string> m_auth_info;
 	
 	std::string m_path;
@@ -94,10 +105,85 @@ private:
 	pthread_rwlock_t m_synch;
 };
 
-void CConfig::DoRead() {
+
+unsigned CConfig::ExtractValue(const std::string &data, const std::string &pattern) {
+	boost::match_results<std::string::const_iterator> reg_res;
+	unsigned value;
+//std::cout << data << "\n\n\n";
+	if (!boost::regex_search(data, reg_res, boost::regex(pattern))) {
+		return -1;
+	}
+	else {
+		std::stringstream ioss;
+		ioss << std::string (reg_res[1].first, reg_res[1].second);
+		ioss >> value;
+	}
+	
+	return value;
+}
+
+
+std::string CConfig::ExtractString(const std::string &data, const std::string &pattern) {
+	boost::match_results<std::string::const_iterator> reg_res;
+	
+	if (!boost::regex_search(data, reg_res, boost::regex(pattern))) {
+		return "";
+	}
+	else {
+		return std::string (reg_res[1].first, reg_res[1].second);
+	}
+}
+
+
+void CConfig::ExtraxtAuthData(const std::string &data) {
+	boost::match_results<std::string::const_iterator> reg_res;
+	std::string pattern = "[^#]auth\\s*=\\s*([\\w\\-]+)[:]([\\w\\-]+)";
+	boost::regex reg_val(pattern);
+	size_t num = 0;
+	
+	std::string::const_iterator it = data.begin(), end = data.end();
+	while (boost::regex_search(it, end, reg_res, reg_val)) {
+		m_auth_info.insert(
+			std::make_pair (
+				std::string(reg_res[1].first, reg_res[1].second),
+				std::string(reg_res[2].first, reg_res[2].second)
+			)
+		);
+		
+		it = reg_res[0].second;
+		++num;
+	}
+	if (!num)
+		throw std::runtime_error("Not found auth information");
+	
 	return;
 }
 
+
+void CConfig::DoRead() {
+	std::ifstream ifs(m_path);
+	std::string text, data;
+	
+	while(std::getline(ifs, text)) {
+		data.append(text + '\n');
+	}
+	
+	if ((m_max_connections = ExtractValue(data, "[^#]max_connections\\s*=\\s*(\\d+)")) == static_cast<unsigned>(-1)) {
+		throw std::runtime_error("Can't find max_connections parameter in config file: " + m_path);
+	}
+	if ((m_max_threads = ExtractValue(data, "[^#]worker_threads_number\\s*=\\s*(\\d+)")) == static_cast<unsigned>(-1)) {
+		throw std::runtime_error("Can't find worker_threads_number parameter in config file: " + m_path);
+	}
+	if ((m_port = ExtractValue(data, "[^#]port\\s*=\\s*(\\d+)")) == static_cast<unsigned>(-1)) {
+		throw std::runtime_error("Can't find port parameter in config file: " + m_path);
+	}
+	if ((m_log_file = ExtractString(data, "[^#]log_file\\s*=\\s*(\\s+)")) == "") {
+		throw std::runtime_error("Can't find port parameter in config file: " + m_path);
+	}
+	ExtraxtAuthData(data);
+	
+	return;
+}
 
 
 class CLogger: boost::noncopyable {
@@ -219,8 +305,12 @@ private:
 
 class CTcpServer: public std::enable_shared_from_this<CTcpServer> {
 public:
-	static std::shared_ptr<CTcpServer> MakeTcpServer(boost::asio::io_service& io_service, int port) {
-		return std::shared_ptr<CTcpServer> (new CTcpServer (io_service, port));
+	static std::shared_ptr<CTcpServer> MakeTcpServer(
+		boost::asio::io_service& io_service,
+		int port,
+		unsigned max_connections
+	) {
+		return std::shared_ptr<CTcpServer> (new CTcpServer (io_service, port, max_connections));
 	}
 	
 	void NotifyClients(Frames::CWebcam &cam) {
@@ -259,9 +349,10 @@ public:
 	}
 	
 private:
-	CTcpServer(boost::asio::io_service& io_service, int port):
+	CTcpServer(boost::asio::io_service& io_service, int port, unsigned max_connections):
 		m_acceptor(io_service, tcp::endpoint(tcp::v4(), port)),
-		m_port(port)
+		m_port(port),
+		m_max_connections(max_connections)
 	{
 		return;
 	}
@@ -272,18 +363,35 @@ private:
 	)
 	{
 		if (!error) {
-			boost::mutex::scoped_lock lock(m_conn_mut);
-			m_connections.push_front(new_connection);
+			if (CheckAuthInformation(new_connection)) {
+				boost::mutex::scoped_lock lock(m_conn_mut);
+				m_connections.push_front(new_connection);
+			}
 		}
 		StartAccept();
 	}
 	
+	bool CheckAuthInformation(CTcpConnection::Pointer connection);
+	
 private:
 	tcp::acceptor m_acceptor;
+	
 	boost::mutex m_conn_mut;
 	std::list<CTcpConnection::Pointer> m_connections;
+	
 	int m_port;
+	unsigned m_max_connections;
 };
+
+
+bool CTcpServer::CheckAuthInformation(CTcpConnection::Pointer connection) {
+	
+	
+	//
+	
+	
+	return true;
+}
 
 //--------------------------------------------------------------------
 	
@@ -372,32 +480,36 @@ void CTcpConnection::SendData(Frames::CWebcam &cam) {
 
 //--------------------------------------------------------------------
 
-int main() {
-	unsigned thr_number = 5;
+int main(int argc, char *argv[]) {
 	unsigned milisec_sleep = 10;
-	const int port = 8899;
-	const unsigned max_connections = 100;
-	const std::string log = "async_log.txt";
-	std::string config = "conf.txt";
-	std::unordered_map <std::string, std::string> user_data;
-	user_data["one"] = "two";
+	
+	if (argc < 2) {
+		std::cout << "Enter a path to config file\n";
+		return 1001;
+	}
 	
 	try {
-		CLogger::GetLogger().OpenLog(log);
+		CConfig::GetConfig().Read(argv[1]);
+		CLogger::GetLogger().OpenLog(CConfig::GetConfig().GetLogPath());
+		
 		boost::thread_group thr_grp;
 		boost::asio::io_service io_service;
-		std::shared_ptr<CTcpServer> server(CTcpServer::MakeTcpServer(io_service, port));
-		
+	
+		std::shared_ptr<CTcpServer> server(CTcpServer::MakeTcpServer(
+			io_service,
+			CConfig::GetConfig().GetPort(),
+			CConfig::GetConfig().GetMaxConnections())
+		);	
 		server->StartAccept();
 		
-		for (unsigned i = 0; i < thr_number; ++i) {
+		for (unsigned i = 0; i < CConfig::GetConfig().GetMaxThreads(); ++i) {
 			thr_grp.create_thread( [&]()->void {io_service.run();} );
 		}
 		
 		Frames::CWebcam first_cam;
-		
+	
 		while (true)
-		{
+		{	
 			first_cam.RefreshFrame();
 			server->NotifyClients(first_cam);
 			boost::this_thread::sleep(boost::posix_time::millisec(milisec_sleep));

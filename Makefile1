@@ -5,18 +5,20 @@ CC = g++
 
 CFLAGS = -I/usr/include/opencv2 -I/usr/local/include/boost-1_57
 CFLAGS += -c -pedantic -std=c++11 -Wno-reorder -Wno-switch -O2 -Wall
+
 LFLAGS = -L/usr/local/lib/boost1_57/shared
-LFLAGS += -lpthread -lboost_system-gcc47-mt-1_57 -lboost_thread-gcc47-mt-1_57 -lopencv_highgui -lopencv_core -lopencv_imgproc
+LFLAGS += -lpthread -lboost_system-gcc47-mt-1_57 -lboost_thread-gcc47-mt-1_57 
+LFLAGS += -lboost_regex-gcc47-mt-1_57 -lopencv_highgui -lopencv_core -lopencv_imgproc
 
 
 
 all: as_srv s_cln
 
-as_srv: as_srv.o cam.o
-	$(CC) $(LFLAGS) as_srv.o cam.o -o as_srv
+as_srv: as_srv.o cam.o net.o
+	$(CC) $(LFLAGS) as_srv.o cam.o net.o -o as_srv
 
-s_cln: s_cln.o cam.o
-	$(CC) $(LFLAGS) s_cln.o cam.o -o s_cln
+s_cln: s_cln.o cam.o net.o
+	$(CC) $(LFLAGS) s_cln.o cam.o net.o -o s_cln
 
 as_srv.o: as_srv.cpp net.hpp cam.hpp
 	$(CC) $(CFLAGS) as_srv.cpp
@@ -27,6 +29,8 @@ cam.o: cam.cpp cam.hpp
 s_cln.o: s_cln.cpp net.hpp cam.hpp
 	$(CC) $(CFLAGS) s_cln.cpp
 
+net.o: net.cpp net.hpp
+	$(CC) $(CFLAGS) net.cpp
 
 clean:
 	rm -rf *.o
