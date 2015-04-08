@@ -46,15 +46,15 @@ void ReadData(tcp::socket &sock, std::vector<unsigned char> &data, int &rows, in
 template <typename T>
 boost::system::error_code SendData(
 	tcp::socket &sock,
-	NetThings::REQUEST_HEADER & msg_hdr,
+	const NetThings::REQUEST_HEADER & msg_hdr,
 	const T & user_data
 ) {
 	boost::system::error_code error;
 	std::vector<unsigned char> data(sizeof msg_hdr + user_data.size());
 	
 	std::copy(
-		reinterpret_cast <char*> (&msg_hdr),
-		reinterpret_cast <char*> (&msg_hdr) + sizeof msg_hdr,
+		reinterpret_cast <const char*> (&msg_hdr),
+		reinterpret_cast <const char*> (&msg_hdr) + sizeof msg_hdr,
 		data.begin()
 	);
 	std::copy(user_data.begin(), user_data.end(), data.begin() + sizeof msg_hdr);

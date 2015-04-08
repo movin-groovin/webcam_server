@@ -2,7 +2,10 @@
 #include "net.hpp"
 #include "cam.hpp"
 
+#include <cstdlib>
+
 #include <unordered_map>
+#include <atomic>
 
 #include <boost/regex.hpp>
 
@@ -257,9 +260,13 @@ public:
 		return;
 	}
 	
+	bool WasAuth() const {
+		return m_was_auth;
+	}
+	
 	bool IsBad() {
 		bool ret_val;
-		boost::mutex::scoped_lock lock(m_synch);
+		boost::mutex::scoped_lock lock(m_synch_connecton_flag);
 		ret_val = m_bad_connection;
 		return ret_val;
 	}
@@ -273,7 +280,11 @@ private:
 		):
 			m_socket(io_service),
 			m_serv(serv),
-			m_bad_connection(false)
+			m_bad_connection(false),
+			m_bad_auth(false),
+			m_successfull_auth(false),
+			m_was_auth(false),
+			m_number_net_operations(0)
 		{}
 	
 	void SendAsyncHeader(NetThings::REQUEST_HEADER &hdr);
@@ -289,17 +300,73 @@ private:
 	);
 	
 	void MarkBad() {
-		boost::mutex::scoped_lock lock(m_synch);
+		boost::mutex::scoped_lock lock(m_synch_connecton_flag);
 		m_bad_connection = true;
 	}
 	
+	bool CheckAuthInformation();
+	
+	void OnReadHeader(
+		const boost::system::error_code &error,
+		size_t bytes_num_transf
+	);
+	
+	void HandleReadOnAuth(
+		const boost::system::error_code& error,
+		size_t /*bytes_transferred*/
+	);
+	
+	unsigned long long PreIncNetOperationsNumber() {
+		return ++m_number_net_operations;
+	}
+	
+	unsigned long long PreDecNetOperationsNumber() {
+		return --m_number_net_operations;
+	}
+	
+	unsigned long long GetNetOperationsNumber() {
+		return m_number_net_operations.load();
+	}
+	
+	inline bool TestAndFinishConnection();
+	
 private:
 	tcp::socket m_socket;
-	std::vector<char> m_data;
+	std::vector<char> m_data, auth_buf;
 	std::shared_ptr<CTcpServer> m_serv;
-	boost::mutex m_synch;
+	
+	boost::mutex m_synch_connecton_flag;
 	bool m_bad_connection;
+	
+	boost::mutex m_synch_auth_flags;
+	bool m_bad_auth;
+	bool m_successfull_auth;
+	bool m_was_auth;
+	
+	std::atomic<unsigned long long> m_number_net_operations;
 };
+//--------------------------------------------------------------------
+bool CTcpConnection::CheckAuthInformation() {
+	if (TestAndFinishConnection()) {
+		return false;
+	}
+	
+	auth_buf.resize(sizeof(NetThings::REQUEST_HEADER));
+	
+	PreIncNetOperationsNumber();
+	boost::asio::async_read(
+		m_socket,
+		boost::asio::buffer(auth_buf),
+		std::bind(
+			&CTcpConnection::OnReadHeader,
+			shared_from_this(),
+			std::placeholders::_1,
+			std::placeholders::_2
+		)
+	);
+	
+	return true;
+}
 
 //--------------------------------------------------------------------
 
@@ -314,7 +381,7 @@ public:
 	}
 	
 	void NotifyClients(Frames::CWebcam &cam) {
-		boost::mutex::scoped_lock lock(m_conn_mut);
+		boost::recursive_mutex::scoped_lock lock(m_conn_mut);
 		
 		std::for_each(
 			m_connections.begin(),
@@ -326,7 +393,7 @@ public:
 	}
 	
 	void RemoveConnection(CTcpConnection::Pointer p) {
-		boost::mutex::scoped_lock lock(m_conn_mut);
+		boost::recursive_mutex::scoped_lock lock(m_conn_mut);
 		m_connections.remove(p);
 	}
 	
@@ -363,49 +430,51 @@ private:
 	)
 	{
 		if (!error) {
-			if (CheckAuthInformation(new_connection)) {
-				boost::mutex::scoped_lock lock(m_conn_mut);
-				m_connections.push_front(new_connection);
-			}
+			boost::recursive_mutex::scoped_lock lock(m_conn_mut);
+			m_connections.push_front(new_connection);
 		}
 		StartAccept();
 	}
 	
-	bool CheckAuthInformation(CTcpConnection::Pointer connection);
-	
 private:
 	tcp::acceptor m_acceptor;
 	
-	boost::mutex m_conn_mut;
+	boost::recursive_mutex m_conn_mut;
 	std::list<CTcpConnection::Pointer> m_connections;
 	
 	int m_port;
 	unsigned m_max_connections;
 };
-
-
-bool CTcpServer::CheckAuthInformation(CTcpConnection::Pointer connection) {
-	
-	
-	//
-	
-	
-	return true;
-}
-
 //--------------------------------------------------------------------
-	
+bool CTcpConnection::TestAndFinishConnection() {
+	if (IsBad() && GetNetOperationsNumber()) {
+		m_serv->RemoveConnection(shared_from_this());
+		return true;
+	}
+	return IsBad();
+}
+//--------------------------------------------------------------------
 void CTcpConnection::OnSentHeader(
 	const boost::system::error_code &error,
 	size_t bytes_num_transf
 )
 {
-	if (error) {
-		WriteError(error);
-		m_serv->RemoveConnection(shared_from_this());
+	PreDecNetOperationsNumber();
+	if (TestAndFinishConnection()) {
 		return;
 	}
 	
+	if (error) {
+		WriteError(error);
+		MarkBad();
+		return;
+	}
+	
+	if (!m_data.size()) {
+		return;
+	}
+	
+	PreIncNetOperationsNumber();
 	boost::asio::async_write(
 		m_socket,
 		boost::asio::buffer(m_data),
@@ -420,19 +489,119 @@ void CTcpConnection::OnSentHeader(
 	return;
 }
 //--------------------------------------------------------------------
+void CTcpConnection::OnReadHeader(
+	const boost::system::error_code &error,
+	size_t bytes_num_transf
+)
+{
+	PreDecNetOperationsNumber();
+	if (TestAndFinishConnection()) {
+		return;
+	}
+	
+	if (error) {
+		MarkBad();
+		WriteError(error);
+		return;
+	}
+	
+	NetThings::REQUEST_HEADER hdr {};
+	std::copy(auth_buf.begin(), auth_buf.end(), reinterpret_cast<char*>(&hdr));
+	auth_buf.resize(auth_buf.size() + hdr.u.s.size);
+	
+	if (hdr.u.s.command == NetThings::AuthData) {
+		PreIncNetOperationsNumber();
+		boost::asio::async_read(
+			m_socket,
+			boost::asio::buffer(&auth_buf[0] + sizeof hdr, hdr.u.s.size),
+			std::bind(
+				&CTcpConnection::HandleReadOnAuth,
+				shared_from_this(),
+				std::placeholders::_1,
+				std::placeholders::_2
+			)
+		);
+	}
+	
+	return;
+}
+//--------------------------------------------------------------------
+void CTcpConnection::HandleReadOnAuth(
+	const boost::system::error_code& error,
+	size_t /*bytes_transferred*/)
+{
+	PreDecNetOperationsNumber();
+	if (TestAndFinishConnection()) {
+		return;
+	}
+	
+	if (error) {
+		MarkBad();
+		WriteError(error);
+	}
+	
+	boost::mutex::scoped_lock lock(m_synch_auth_flags);
+	m_data.resize(0);
+	NetThings::REQUEST_HEADER hdr;
+	NetThings::FillHeader(hdr, m_data.size());
+	
+	if(m_was_auth && !m_successfull_auth) {
+		std::string auth_str(auth_buf.begin() + sizeof (NetThings::REQUEST_HEADER), auth_buf.end());
+		std::string::size_type colon_pos = auth_str.find(NetThings::SeparatorAuthChar);
+		
+		if (colon_pos == std::string::npos) {
+			m_bad_auth = true;
+			hdr.u.s.status = NetThings::AuthError;
+			
+			SendAsyncHeader(hdr);
+			WriteError("Illformed auth string");
+			
+			return;
+		}
+		
+		std::string name(auth_str.begin(), auth_str.begin() + colon_pos);
+		std::string pass(auth_str.begin() + colon_pos + 1, auth_str.end());
+		
+		if (CConfig::GetConfig().CheckAuth(name, pass)) {
+			hdr.u.s.status = NetThings::AuthSuccess;
+			
+			SendAsyncHeader(hdr);
+			m_successfull_auth = true;
+		} else {
+
+			hdr.u.s.status = NetThings::AuthError;
+			m_bad_auth = true;
+			
+			SendAsyncHeader(hdr);
+			WriteError("Incorrect authentication data");
+		}
+	}
+	
+	return;
+}
+//--------------------------------------------------------------------
 void CTcpConnection::HandleWrite(
 	const boost::system::error_code& error,
 	size_t /*bytes_transferred*/)
 {
+	PreDecNetOperationsNumber();
+	if (TestAndFinishConnection()) {
+		return;
+	}
+	
 	if (error) {
 		WriteError(error);
-		m_serv->RemoveConnection(shared_from_this());
+		MarkBad();
 	}
 	
 	return;
 }
 //--------------------------------------------------------------------
 void CTcpConnection::SendAsyncHeader(NetThings::REQUEST_HEADER &hdr) {
+	if (TestAndFinishConnection()) {
+		return;
+	}
+	
 	try {
 		std::vector<char> hdr_buf(sizeof hdr);
 		
@@ -441,6 +610,8 @@ void CTcpConnection::SendAsyncHeader(NetThings::REQUEST_HEADER &hdr) {
 			reinterpret_cast<char*>(&hdr) + sizeof hdr,
 			hdr_buf.begin()
 		);
+		
+		PreIncNetOperationsNumber();
 		boost::asio::async_write(
 			m_socket,
 			boost::asio::buffer(hdr_buf),
@@ -454,7 +625,7 @@ void CTcpConnection::SendAsyncHeader(NetThings::REQUEST_HEADER &hdr) {
 	} catch (std::exception &exc)
 	{
 		WriteError(exc.what());
-		m_serv->RemoveConnection(shared_from_this());
+		MarkBad();
 		return;
 	}
 	
@@ -462,11 +633,36 @@ void CTcpConnection::SendAsyncHeader(NetThings::REQUEST_HEADER &hdr) {
 }
 //--------------------------------------------------------------------
 void CTcpConnection::SendData(Frames::CWebcam &cam) {
+	if (TestAndFinishConnection()) {
+		return;
+	}
+	
+	{
+		m_synch_auth_flags.lock();
+		if (!m_was_auth) {
+			m_was_auth = true;
+			m_synch_auth_flags.unlock();
+			CheckAuthInformation();
+			return;
+		}
+		if (m_bad_auth) {
+			m_synch_auth_flags.unlock();
+			WriteError("Bad authentication with client");
+			MarkBad();
+			return;
+		}
+		if (!m_successfull_auth) {
+			m_synch_auth_flags.unlock();
+			return;
+		}
+		m_synch_auth_flags.unlock();
+	}
+	
 	try {
 		cam.GetData(m_data);
 	} catch (std::exception &exc) {
 		WriteError(exc.what());
-		m_serv->RemoveConnection(shared_from_this());
+		MarkBad();
 		return;
 	}
 	
@@ -477,9 +673,7 @@ void CTcpConnection::SendData(Frames::CWebcam &cam) {
 	
 	return;
 }
-
 //--------------------------------------------------------------------
-
 int main(int argc, char *argv[]) {
 	unsigned milisec_sleep = 10;
 	

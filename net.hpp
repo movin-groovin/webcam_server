@@ -52,6 +52,7 @@ enum Statuses {
 	LowStatus = 0,
 	Success,
 	AuthSuccess,
+	AuthError,
 	Error,
 	NewStatus,
 	HighStatus
@@ -79,6 +80,8 @@ const unsigned MinFrameHeight = 0;
 const unsigned MaxFrameHeight = 2000;
 const unsigned MinFrameWidth = 0;
 const unsigned MaxFrameWidth = 2000;
+
+const char SeparatorAuthChar = ':';
 
 
 
