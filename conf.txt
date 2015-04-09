@@ -3,7 +3,7 @@
 
 max_connections = 100
 worker_threads_number = 10
-port = 9988
+port = 12345
 
 auth = admin:fuck_Puck_1991
 auth = user:OppaHello981

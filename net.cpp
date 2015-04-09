@@ -7,6 +7,9 @@ namespace NetThings {
 
 
 bool CheckInvariantHeader(const REQUEST_HEADER &hdr) {
+	
+std::cout << "hdr.u.s.command: " << hdr.u.s.command << " hdr.u.s.status: " << hdr.u.s.status << " hdr.u.s.extra_status: "<< hdr.u.s.extra_status
+	<< " hdr.u.s.size: "<< hdr.u.s.size << " hdr.u.s.height: "<< hdr.u.s.height << " hdr.u.s.width: "<< hdr.u.s.width << "\n";
 	return CheckCommand(hdr.u.s.command) &&
 		   CheckStatus(hdr.u.s.status) &&
 		   CheckExtraStatus(hdr.u.s.extra_status) &&

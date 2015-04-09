@@ -7,7 +7,7 @@
 
 
 
-void ReadData(tcp::socket &sock, std::vector<unsigned char> &data, int &rows, int &cols) {
+int ReadData(tcp::socket &sock, std::vector<unsigned char> &data, int &rows, int &cols) {
 	boost::system::error_code error;
 	std::vector<char> hdr_buf(sizeof (NetThings::REQUEST_HEADER));
 	NetThings::REQUEST_HEADER msg_hdr;
@@ -23,7 +23,8 @@ void ReadData(tcp::socket &sock, std::vector<unsigned char> &data, int &rows, in
 	if (!NetThings::CheckInvariantHeader(msg_hdr)) {
 		std::string msg = "Msg header doesn't comply with invariant";
 		std::cout << msg + "\n";
-		throw std::runtime_error(msg);
+		//throw std::runtime_error(msg);
+		return 1;
 	}
 	
 	if (msg_hdr.u.s.size > data.size()) {
@@ -39,7 +40,7 @@ void ReadData(tcp::socket &sock, std::vector<unsigned char> &data, int &rows, in
 	cols = msg_hdr.u.s.width;
 	
 	
-	return;
+	return 0;
 }
 
 
@@ -130,7 +131,7 @@ int main(int argc, char* argv[]) {
 		io_service io_service;
 		tcp::resolver resolver(io_service);
 		tcp::socket socket(io_service);
-		socket.connect(tcp::endpoint (address::from_string("127.0.0.1"), boost::lexical_cast<int>(argv[2])));
+		socket.connect(tcp::endpoint (address::from_string(argv[1]), boost::lexical_cast<int>(argv[2])));
 		cv::namedWindow("edges", 1);
 		
 		if (!SendAuthData(socket, argv[3])) {
@@ -147,10 +148,16 @@ int main(int argc, char* argv[]) {
 		std::vector<unsigned char> data;
 		int rows, cols;
 		for (;;) {
-			ReadData(socket, data, rows, cols);
+			if (1 == ReadData(socket, data, rows, cols)) {
+				continue;
+			}
 			cv::Mat img = Frames::RestoreFromBuff (&data[0], rows, cols);
 			
-			cv::imshow("edges", img);
+			try {
+				cv::imshow("edges", img);
+			} catch (...) {
+				continue;
+			}
 			if ('q' == cv::waitKey(1)) {
 				std::cout << "Bye bye\n";
 				break;

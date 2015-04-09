@@ -444,6 +444,7 @@ private:
 		m_port(port),
 		m_max_connections(max_connections)
 	{
+		//m_acceptor.listen();
 		return;
 	}
 	
@@ -633,7 +634,8 @@ void CTcpConnection::SendAsyncHeader(NetThings::REQUEST_HEADER &hdr) {
 			reinterpret_cast<char*>(&hdr) + sizeof hdr,
 			hdr_buf.begin()
 		);
-		
+std::cout << "hdr.u.s.command: " << hdr.u.s.command << " hdr.u.s.status: " << hdr.u.s.status << " hdr.u.s.extra_status: "<< hdr.u.s.extra_status
+	<< " hdr.u.s.size: "<< hdr.u.s.size << " hdr.u.s.height: "<< hdr.u.s.height << " hdr.u.s.width: "<< hdr.u.s.width << "\n";
 		PreIncNetOperationsNumber();
 		boost::asio::async_write(
 			m_socket,
@@ -697,7 +699,7 @@ void CTcpConnection::SendData(Frames::CWebcam &cam) {
 }
 //--------------------------------------------------------------------
 int main(int argc, char *argv[]) {
-	unsigned milisec_sleep = 10;
+	unsigned milisec_sleep = 1000;
 	unsigned wait_cam_milisec = 1000;
 	boost::posix_time::time_duration duration_clear(0, 0, 5);
 	
