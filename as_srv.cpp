@@ -750,7 +750,7 @@ int main(int argc, char *argv[]) {
 			if (duration_clear < (boost::posix_time::second_clock::local_time() - new_clear_period)) {
 				new_clear_period = boost::posix_time::second_clock::local_time();
 				server->ClearBadConnections();
-				std::cout << "Bad connections clearing\n";
+				//std::cout << "Bad connections clearing\n";
 			}
 			//
 		}
