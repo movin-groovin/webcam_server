@@ -79,6 +79,25 @@ public:
 		
 		return;
 	}
+	
+	bool CloseCamera() {
+		m_cap.release();
+		return true;
+	}
+	
+	bool IsOPened() const {
+		return m_cap.isOpened();
+	}
+	
+	bool OpenCamera () {
+		try {
+			m_cap = AdjustCamera(m_height_frame, m_width_frame, m_cam_number);
+		} catch (std::exception & Exc) {
+			// WriteToLog("Can't open camera, " + Exc.what());
+			return false;
+		}
+		return true;
+	}
 
 	void RefreshFrame() {
 		cv::Mat frame;

@@ -112,7 +112,7 @@ private:
 unsigned CConfig::ExtractValue(const std::string &data, const std::string &pattern) {
 	boost::match_results<std::string::const_iterator> reg_res;
 	unsigned value;
-//std::cout << data << "\n\n\n";
+	
 	if (!boost::regex_search(data, reg_res, boost::regex(pattern))) {
 		return -1;
 	}
@@ -180,7 +180,7 @@ void CConfig::DoRead() {
 	if ((m_port = ExtractValue(data, "[^#]port\\s*=\\s*(\\d+)")) == static_cast<unsigned>(-1)) {
 		throw std::runtime_error("Can't find port parameter in config file: " + m_path);
 	}
-	if ((m_log_file = ExtractString(data, "[^#]log_file\\s*=\\s*(\\s+)")) == "") {
+	if ((m_log_file = ExtractString(data, "[^#]log_file\\s*=\\s*([\\w\\.]+)")) == "") {
 		throw std::runtime_error("Can't find port parameter in config file: " + m_path);
 	}
 	ExtraxtAuthData(data);
@@ -192,13 +192,13 @@ void CConfig::DoRead() {
 class CLogger: boost::noncopyable {
 public:
 	void OpenLog(const std::string &path) {
-		m_path = path;
-		
+		m_path = path;	
 		if (!m_ofs.is_open()) {
 			m_ofs.open(m_path, std::ios_base::out | std::ios_base::app);
 			if (!m_ofs.is_open())
 				throw std::runtime_error("Can't open log file: " + m_path);
 		}
+		PutToLog("\n\n\n\n\n === The log file has opened === ");
 		
 		return;
 	}
@@ -264,11 +264,10 @@ public:
 		return m_was_auth;
 	}
 	
-	bool IsBad() {
-		bool ret_val;
-		boost::mutex::scoped_lock lock(m_synch_connecton_flag);
-		ret_val = m_bad_connection;
-		return ret_val;
+	bool IsBad();
+	
+	unsigned long long GetCount() {
+		return m_number_net_operations.load();
 	}
 	
 	virtual ~CTcpConnection() {}
@@ -328,7 +327,7 @@ private:
 		return m_number_net_operations.load();
 	}
 	
-	inline bool TestAndFinishConnection();
+	inline bool TestConnectionAndFinishOperation();
 	
 private:
 	tcp::socket m_socket;
@@ -346,8 +345,15 @@ private:
 	std::atomic<unsigned long long> m_number_net_operations;
 };
 //--------------------------------------------------------------------
+bool CTcpConnection::IsBad() {
+	bool ret_val;
+	boost::mutex::scoped_lock lock(m_synch_connecton_flag);
+	ret_val = m_bad_connection;
+	return ret_val;
+}
+//--------------------------------------------------------------------
 bool CTcpConnection::CheckAuthInformation() {
-	if (TestAndFinishConnection()) {
+	if (TestConnectionAndFinishOperation()) {
 		return false;
 	}
 	
@@ -381,7 +387,19 @@ public:
 	}
 	
 	void NotifyClients(Frames::CWebcam &cam) {
-		boost::recursive_mutex::scoped_lock lock(m_conn_mut);
+		boost::mutex::scoped_lock lock(m_conn_mut);
+
+		auto end = m_connections.end();
+		for (auto it = m_connections.begin(); it != end; ) {
+			CTcpConnection::Pointer p = *it;
+			if (p->IsBad()) {
+				m_bad_connections.push_back(p);
+				m_connections.erase(it);
+				it = m_connections.begin();
+			} else {
+				++it;
+			}
+		}
 		
 		std::for_each(
 			m_connections.begin(),
@@ -392,9 +410,9 @@ public:
 		return;
 	}
 	
-	void RemoveConnection(CTcpConnection::Pointer p) {
-		boost::recursive_mutex::scoped_lock lock(m_conn_mut);
-		m_connections.remove(p);
+	void ClearBadConnections() {
+		boost::mutex::scoped_lock lock(m_conn_mut);
+		m_bad_connections.clear();
 	}
 	
 	void StartAccept()
@@ -415,6 +433,11 @@ public:
 		return;
 	}
 	
+	bool HaveConnections() {
+		boost::mutex::scoped_lock(m_conn_mut);
+		return !m_connections.empty();
+	}
+	
 private:
 	CTcpServer(boost::asio::io_service& io_service, int port, unsigned max_connections):
 		m_acceptor(io_service, tcp::endpoint(tcp::v4(), port)),
@@ -430,7 +453,7 @@ private:
 	)
 	{
 		if (!error) {
-			boost::recursive_mutex::scoped_lock lock(m_conn_mut);
+			boost::mutex::scoped_lock lock(m_conn_mut);
 			m_connections.push_front(new_connection);
 		}
 		StartAccept();
@@ -439,16 +462,16 @@ private:
 private:
 	tcp::acceptor m_acceptor;
 	
-	boost::recursive_mutex m_conn_mut;
+	boost::mutex m_conn_mut;
 	std::list<CTcpConnection::Pointer> m_connections;
+	std::list<CTcpConnection::Pointer> m_bad_connections;
 	
 	int m_port;
 	unsigned m_max_connections;
 };
 //--------------------------------------------------------------------
-bool CTcpConnection::TestAndFinishConnection() {
-	if (IsBad() && GetNetOperationsNumber()) {
-		m_serv->RemoveConnection(shared_from_this());
+bool CTcpConnection::TestConnectionAndFinishOperation() {
+	if (IsBad() && !GetNetOperationsNumber()) {
 		return true;
 	}
 	return IsBad();
@@ -460,7 +483,7 @@ void CTcpConnection::OnSentHeader(
 )
 {
 	PreDecNetOperationsNumber();
-	if (TestAndFinishConnection()) {
+	if (TestConnectionAndFinishOperation()) {
 		return;
 	}
 	
@@ -495,7 +518,7 @@ void CTcpConnection::OnReadHeader(
 )
 {
 	PreDecNetOperationsNumber();
-	if (TestAndFinishConnection()) {
+	if (TestConnectionAndFinishOperation()) {
 		return;
 	}
 	
@@ -531,7 +554,7 @@ void CTcpConnection::HandleReadOnAuth(
 	size_t /*bytes_transferred*/)
 {
 	PreDecNetOperationsNumber();
-	if (TestAndFinishConnection()) {
+	if (TestConnectionAndFinishOperation()) {
 		return;
 	}
 	
@@ -585,7 +608,7 @@ void CTcpConnection::HandleWrite(
 	size_t /*bytes_transferred*/)
 {
 	PreDecNetOperationsNumber();
-	if (TestAndFinishConnection()) {
+	if (TestConnectionAndFinishOperation()) {
 		return;
 	}
 	
@@ -598,7 +621,7 @@ void CTcpConnection::HandleWrite(
 }
 //--------------------------------------------------------------------
 void CTcpConnection::SendAsyncHeader(NetThings::REQUEST_HEADER &hdr) {
-	if (TestAndFinishConnection()) {
+	if (TestConnectionAndFinishOperation()) {
 		return;
 	}
 	
@@ -633,10 +656,10 @@ void CTcpConnection::SendAsyncHeader(NetThings::REQUEST_HEADER &hdr) {
 }
 //--------------------------------------------------------------------
 void CTcpConnection::SendData(Frames::CWebcam &cam) {
-	if (TestAndFinishConnection()) {
+	if (TestConnectionAndFinishOperation()) {
 		return;
 	}
-	
+
 	{
 		m_synch_auth_flags.lock();
 		if (!m_was_auth) {
@@ -668,7 +691,6 @@ void CTcpConnection::SendData(Frames::CWebcam &cam) {
 	
 	NetThings::REQUEST_HEADER hdr;
 	NetThings::FillHeader(hdr, m_data.size(), cam.GetHeight(), cam.GetWidth());
-	
 	SendAsyncHeader(hdr);
 	
 	return;
@@ -676,6 +698,8 @@ void CTcpConnection::SendData(Frames::CWebcam &cam) {
 //--------------------------------------------------------------------
 int main(int argc, char *argv[]) {
 	unsigned milisec_sleep = 10;
+	unsigned wait_cam_milisec = 1000;
+	boost::posix_time::time_duration duration_clear(0, 0, 5);
 	
 	if (argc < 2) {
 		std::cout << "Enter a path to config file\n";
@@ -702,11 +726,33 @@ int main(int argc, char *argv[]) {
 		
 		Frames::CWebcam first_cam;
 	
+		boost::posix_time::ptime new_clear_period = boost::posix_time::second_clock::local_time();
 		while (true)
 		{	
-			first_cam.RefreshFrame();
-			server->NotifyClients(first_cam);
+			if (server->HaveConnections()) {
+				if (!first_cam.IsOPened())
+				{
+					if (!first_cam.OpenCamera())
+					{
+						CLogger::GetLogger().PutToLog("Can't open the camera, wait ...");
+						boost::this_thread::sleep(boost::posix_time::milliseconds(wait_cam_milisec));
+					}
+				}
+				
+				first_cam.RefreshFrame();
+				server->NotifyClients(first_cam);
+			} else if (first_cam.IsOPened()) {
+				first_cam.CloseCamera();
+			}
+			
 			boost::this_thread::sleep(boost::posix_time::millisec(milisec_sleep));
+			
+			if (duration_clear < (boost::posix_time::second_clock::local_time() - new_clear_period)) {
+				new_clear_period = boost::posix_time::second_clock::local_time();
+				server->ClearBadConnections();
+				std::cout << "Bad connections clearing\n";
+			}
+			//
 		}
 		
 		std::cout << "Wating termination...\n";
