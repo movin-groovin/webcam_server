@@ -4,11 +4,19 @@
 
 #include <cstdlib>
 
+#include <signal.h>
+
 #include <unordered_map>
 #include <atomic>
 
 #include <boost/regex.hpp>
 
+
+
+struct ThreadHolder {
+	boost::thread_group thread_group;
+	std::vector<boost::thread*> crated_threads;
+};
 
 
 class CConfig {
@@ -19,28 +27,38 @@ public:
 	}
 	
 	void Read (const std::string &path) {
+		ReleaseHolder lock(*this);
 		m_path = path;
-		CaptureLock();
-		try {
-			DoRead();
-		} catch (...) {
-			ReleaseLock();
-			throw;
-		}
-		ReleaseLock();
+		DoRead();
 	}
 	
 	unsigned GetPort () const {
+		ReleaseHolder lock(*this);
 		return m_port;
 	}
 	unsigned GetMaxThreads () const {
+		ReleaseHolder lock(*this);
 		return m_max_threads;
 	}
 	unsigned GetMaxConnections () const {
+		ReleaseHolder lock(*this);
 		return m_max_connections;
 	}
 	std::string GetLogPath() const {
+		ReleaseHolder lock(*this);
 		return m_log_file;
+	}
+	unsigned GetFps () const {
+		ReleaseHolder lock(*this);
+		return m_fps;
+	}
+	unsigned GetHeight () const {
+		ReleaseHolder lock(*this);
+		return m_height;
+	}
+	unsigned GetWidth () const {
+		ReleaseHolder lock(*this);
+		return m_width;
 	}
 	bool CheckAuth(const std::string &name, const std::string &pass) const {
 		std::unordered_map<std::string, std::string>::const_iterator it = m_auth_info.find(name);
@@ -51,13 +69,39 @@ public:
 		
 		return it->second == pass;
 	}
+	bool GetTermFlag() const {
+		ReleaseHolder lock(*this);
+		return m_term_flag;
+	}
+	void SetTermFlag() {
+		ReleaseHolder lock(*this);
+		m_term_flag = true;
+	}
 	
 private:
+	struct ReleaseHolder: private boost::noncopyable {
+		ReleaseHolder(CConfig &conf): m_ref(std::ref(conf)) {
+			m_ref.CaptureWriteLock();
+		}
+		ReleaseHolder(const CConfig &conf): m_ref(std::cref(conf)) {
+			m_ref.CaptureReadLock();
+		}
+		~ReleaseHolder() {
+			ptr->ReleaseLock();
+		}
+		
+		auto m_ref;
+	};
+
 	CConfig():
 		m_max_connections(0),
 		m_port(-1),
 		m_max_threads(0),
 		m_auth_info(1024),
+		m_fps(0),
+		m_height(0),
+		m_width(0),
+		m_term_flag(false),
 		m_read(false)
 	{
 		int ret;
@@ -72,7 +116,18 @@ private:
 		pthread_rwlock_destroy(&m_synch);
 	}
 	
-	void CaptureLock() {
+	void CaptureWriteLock() const {
+#ifdef MY_OWN_DEBUG_1
+		int ret;
+		if (ret = pthread_rwlock_wrlock(&m_synch))
+		{
+			throw std::logic_error(ErrorToString(ret));
+		}
+#else
+		pthread_rwlock_wrlock(&m_synch);
+#endif
+	}
+	void CaptureReadLock() const {
 #ifdef MY_OWN_DEBUG_1
 		int ret;
 		if (ret = pthread_rwlock_rdlock(&m_synch))
@@ -83,7 +138,6 @@ private:
 		pthread_rwlock_rdlock(&m_synch);
 #endif
 	}
-	
 	void ReleaseLock() {
 		pthread_rwlock_unlock(&m_synch);
 	}
@@ -99,13 +153,16 @@ private:
 	unsigned m_max_connections;
 	unsigned m_port;
 	unsigned m_max_threads;
+	unsigned m_fps;
+	unsigned m_height, m_width;
 	std::string m_log_file;
 	std::unordered_map<std::string, std::string> m_auth_info;
+	bool m_term_flag;
 	
 	std::string m_path;
 	bool m_read;
 	
-	pthread_rwlock_t m_synch;
+	mutable pthread_rwlock_t m_synch;
 };
 
 
@@ -152,7 +209,7 @@ void CConfig::ExtraxtAuthData(const std::string &data) {
 				std::string(reg_res[2].first, reg_res[2].second)
 			)
 		);
-		
+std::cout << "name: " << std::string(reg_res[1].first, reg_res[1].second) << "; pass: " << std::string(reg_res[2].first, reg_res[2].second) << "\n";
 		it = reg_res[0].second;
 		++num;
 	}
@@ -181,6 +238,15 @@ void CConfig::DoRead() {
 		throw std::runtime_error("Can't find port parameter in config file: " + m_path);
 	}
 	if ((m_log_file = ExtractString(data, "[^#]log_file\\s*=\\s*([\\w\\.]+)")) == "") {
+		throw std::runtime_error("Can't find port parameter in config file: " + m_path);
+	}
+	if ((m_log_file = ExtractString(data, "[^#]fps\\s*=\\s*(\\d+)+)")) == "") {
+		throw std::runtime_error("Can't find port parameter in config file: " + m_path);
+	}
+	if ((m_log_file = ExtractString(data, "[^#]height\\s*=\\s*(\\d+)")) == "") {
+		throw std::runtime_error("Can't find port parameter in config file: " + m_path);
+	}
+	if ((m_log_file = ExtractString(data, "[^#]width\\s*=\\s*(\\d+)")) == "") {
 		throw std::runtime_error("Can't find port parameter in config file: " + m_path);
 	}
 	ExtraxtAuthData(data);
@@ -472,6 +538,13 @@ private:
 };
 //--------------------------------------------------------------------
 bool CTcpConnection::TestConnectionAndFinishOperation() {
+	try {
+		boost::this_thread::interruption_point();
+	} catch (boost::thread_interrupted & Exc) {
+		CConfig::GetConfig().PutToLog("Interruption was requested for current thread: " + Exc.what());
+		return true;
+	}
+	
 	if (IsBad() && !GetNetOperationsNumber()) {
 		return true;
 	}
@@ -698,9 +771,32 @@ void CTcpConnection::SendData(Frames::CWebcam &cam) {
 	return;
 }
 //--------------------------------------------------------------------
+void sigtermHandler(int sig_num) {
+#ifndef NDEBUG
+	assert(sig_num == SIGTERM);
+#endif
+	CConfig::GetConfig().SetTermFlag();
+	return;
+}
+//--------------------------------------------------------------------
+bool AdjustSignals() {
+	struct sigaction sigterm_acions = {};
+	
+	sigterm_actions.sa_handler = &sigtermHandler;
+	sigfillset(&sigterm_actions.sa_mask);
+	sigterm_actions.sa_flags = 0;
+	if (-1 == sigaction(SIGTERM, &sigterm_actions, NULL)) {
+		return false;
+	}
+	
+	return true;
+}
+//--------------------------------------------------------------------
 int main(int argc, char *argv[]) {
 	unsigned milisec_sleep = 1000;
 	unsigned wait_cam_milisec = 1000;
+	unsigned max_sec_wait = 2;
+	unsigned max_coint_wait = 10;
 	boost::posix_time::time_duration duration_clear(0, 0, 5);
 	
 	if (argc < 2) {
@@ -708,11 +804,17 @@ int main(int argc, char *argv[]) {
 		return 1001;
 	}
 	
+	if (!) {
+		std::cout << "Can't adjust signals\n";
+		return 1002;
+	}
+	
 	try {
 		CConfig::GetConfig().Read(argv[1]);
 		CLogger::GetLogger().OpenLog(CConfig::GetConfig().GetLogPath());
 		
-		boost::thread_group thr_grp;
+		//boost::thread_group thr_grp;
+		ThreadHolder thr_grp;
 		boost::asio::io_service io_service;
 	
 		std::shared_ptr<CTcpServer> server(CTcpServer::MakeTcpServer(
@@ -723,14 +825,25 @@ int main(int argc, char *argv[]) {
 		server->StartAccept();
 		
 		for (unsigned i = 0; i < CConfig::GetConfig().GetMaxThreads(); ++i) {
-			thr_grp.create_thread( [&]()->void {io_service.run();} );
+			thr_grp.created_threads.push_back(
+				thr_grp.thread_group.create_thread([&]()->void {
+					std::cout << "Interruption enabled: " << boost::this_thread::interruption_enabled() << " for thread: " <
+								 boost::this_thread::get_id() << "\n";
+					io_service.run();
+				});
+			);
 		}
 		
-		Frames::CWebcam first_cam;
+		Frames::CWebcam first_cam(0, CConfig::GetConfig().GetHeight(), CConfig::GetConfig().GetWidth());
 	
 		boost::posix_time::ptime new_clear_period = boost::posix_time::second_clock::local_time();
 		while (true)
 		{	
+			if (CConfig::GetConfig().GetTermFlag()) {
+				CLogger::GetLogger().PutToLog("Have gottent SIGTERM, terminating ...");
+				break;
+			}
+			
 			if (server->HaveConnections()) {
 				if (!first_cam.IsOPened())
 				{
@@ -758,7 +871,23 @@ int main(int argc, char *argv[]) {
 		}
 		
 		std::cout << "Wating termination...\n";
-		thr_grp.join_all();
+		unsigned cnt_wait = 0;
+		auto end = thr_grp.created_thread.end();
+		for (auto it = thr_grp.created_thread.begin(); it != end; ++it) {
+			if (!(*it)->try_join_for(boost::chrono::milliseconds(max_sec_wait * 1000))) {
+				(*it)->interrupt();
+				if (max_count_wait > ++cnt_wait) {
+					while (it != end) {
+						++it;
+						(*it)->interrupt();
+						std::cout << "All threads were interrupted\n";
+						goto OUT_OF_SECOND_CYCLE;
+					}
+				}
+			}
+		}
+		OUT_OF_SECOND_CYCLE:
+		thr_grp.thread_group.join_all();
 	}
 	catch (std::exception& e) {
 		std::cerr << e.what() << std::endl;
