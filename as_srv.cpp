@@ -15,7 +15,7 @@
 
 struct ThreadHolder {
 	boost::thread_group thread_group;
-	std::vector<boost::thread*> crated_threads;
+	std::vector<boost::thread*> created_threads;
 };
 
 
@@ -27,37 +27,37 @@ public:
 	}
 	
 	void Read (const std::string &path) {
-		ReleaseHolder lock(*this);
+		ReleaseHolderWrite lock(*this);
 		m_path = path;
 		DoRead();
 	}
 	
 	unsigned GetPort () const {
-		ReleaseHolder lock(*this);
+		ReleaseHolderRead lock(*this);
 		return m_port;
 	}
 	unsigned GetMaxThreads () const {
-		ReleaseHolder lock(*this);
+		ReleaseHolderRead lock(*this);
 		return m_max_threads;
 	}
 	unsigned GetMaxConnections () const {
-		ReleaseHolder lock(*this);
+		ReleaseHolderRead lock(*this);
 		return m_max_connections;
 	}
 	std::string GetLogPath() const {
-		ReleaseHolder lock(*this);
+		ReleaseHolderRead lock(*this);
 		return m_log_file;
 	}
 	unsigned GetFps () const {
-		ReleaseHolder lock(*this);
+		ReleaseHolderRead lock(*this);
 		return m_fps;
 	}
 	unsigned GetHeight () const {
-		ReleaseHolder lock(*this);
+		ReleaseHolderRead lock(*this);
 		return m_height;
 	}
 	unsigned GetWidth () const {
-		ReleaseHolder lock(*this);
+		ReleaseHolderRead lock(*this);
 		return m_width;
 	}
 	bool CheckAuth(const std::string &name, const std::string &pass) const {
@@ -70,37 +70,45 @@ public:
 		return it->second == pass;
 	}
 	bool GetTermFlag() const {
-		ReleaseHolder lock(*this);
+		ReleaseHolderRead lock(*this);
 		return m_term_flag;
 	}
 	void SetTermFlag() {
-		ReleaseHolder lock(*this);
+		ReleaseHolderWrite lock(*this);
 		m_term_flag = true;
 	}
 	
 private:
-	struct ReleaseHolder: private boost::noncopyable {
-		ReleaseHolder(CConfig &conf): m_ref(std::ref(conf)) {
-			m_ref.CaptureWriteLock();
-		}
-		ReleaseHolder(const CConfig &conf): m_ref(std::cref(conf)) {
+	//ReleaseHolder
+	struct ReleaseHolderRead: private boost::noncopyable {
+		ReleaseHolderRead(const CConfig &conf): m_ref(std::cref(conf)) {
 			m_ref.CaptureReadLock();
 		}
-		~ReleaseHolder() {
-			ptr->ReleaseLock();
+		~ReleaseHolderRead() {
+			m_ref.ReleaseLock();
 		}
 		
-		auto m_ref;
+		const CConfig &m_ref;
+	};
+	struct ReleaseHolderWrite: private boost::noncopyable {
+		ReleaseHolderWrite(CConfig &conf): m_ref(conf) {
+			m_ref.CaptureWriteLock();
+		}
+		~ReleaseHolderWrite() {
+			m_ref.ReleaseLock();
+		}
+		
+		CConfig &m_ref;
 	};
 
 	CConfig():
 		m_max_connections(0),
 		m_port(-1),
 		m_max_threads(0),
-		m_auth_info(1024),
 		m_fps(0),
 		m_height(0),
 		m_width(0),
+		m_auth_info(1024),
 		m_term_flag(false),
 		m_read(false)
 	{
@@ -138,7 +146,7 @@ private:
 		pthread_rwlock_rdlock(&m_synch);
 #endif
 	}
-	void ReleaseLock() {
+	void ReleaseLock() const {
 		pthread_rwlock_unlock(&m_synch);
 	}
 	
@@ -541,7 +549,7 @@ bool CTcpConnection::TestConnectionAndFinishOperation() {
 	try {
 		boost::this_thread::interruption_point();
 	} catch (boost::thread_interrupted & Exc) {
-		CConfig::GetConfig().PutToLog("Interruption was requested for current thread: " + Exc.what());
+		CLogger::GetLogger().PutToLog("Interruption was requested for current thread"/*boost::this_thread::get_id()*/);
 		return true;
 	}
 	
@@ -780,7 +788,7 @@ void sigtermHandler(int sig_num) {
 }
 //--------------------------------------------------------------------
 bool AdjustSignals() {
-	struct sigaction sigterm_acions = {};
+	struct sigaction sigterm_actions = {};
 	
 	sigterm_actions.sa_handler = &sigtermHandler;
 	sigfillset(&sigterm_actions.sa_mask);
@@ -796,7 +804,7 @@ int main(int argc, char *argv[]) {
 	unsigned milisec_sleep = 1000;
 	unsigned wait_cam_milisec = 1000;
 	unsigned max_sec_wait = 2;
-	unsigned max_coint_wait = 10;
+	unsigned max_count_wait = 10;
 	boost::posix_time::time_duration duration_clear(0, 0, 5);
 	
 	if (argc < 2) {
@@ -804,7 +812,7 @@ int main(int argc, char *argv[]) {
 		return 1001;
 	}
 	
-	if (!) {
+	if (!AdjustSignals()) {
 		std::cout << "Can't adjust signals\n";
 		return 1002;
 	}
@@ -826,11 +834,13 @@ int main(int argc, char *argv[]) {
 		
 		for (unsigned i = 0; i < CConfig::GetConfig().GetMaxThreads(); ++i) {
 			thr_grp.created_threads.push_back(
-				thr_grp.thread_group.create_thread([&]()->void {
-					std::cout << "Interruption enabled: " << boost::this_thread::interruption_enabled() << " for thread: " <
-								 boost::this_thread::get_id() << "\n";
-					io_service.run();
-				});
+				thr_grp.thread_group.create_thread(
+					[&]()->void {
+						std::cout << "Interruption enabled: " << boost::this_thread::interruption_enabled() << " for thread: " <<
+									 boost::this_thread::get_id() << "\n";
+						io_service.run();
+					}
+				)
 			);
 		}
 		
@@ -872,8 +882,8 @@ int main(int argc, char *argv[]) {
 		
 		std::cout << "Wating termination...\n";
 		unsigned cnt_wait = 0;
-		auto end = thr_grp.created_thread.end();
-		for (auto it = thr_grp.created_thread.begin(); it != end; ++it) {
+		auto end = thr_grp.created_threads.end();
+		for (auto it = thr_grp.created_threads.begin(); it != end; ++it) {
 			if (!(*it)->try_join_for(boost::chrono::milliseconds(max_sec_wait * 1000))) {
 				(*it)->interrupt();
 				if (max_count_wait > ++cnt_wait) {
