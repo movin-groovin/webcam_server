@@ -245,7 +245,7 @@ void CConfig::DoRead() {
 	if ((m_port = ExtractValue(data, "[^#]port\\s*=\\s*(\\d+)")) == static_cast<unsigned>(-1)) {
 		throw std::runtime_error("Can't find port parameter in config file: " + m_path);
 	}
-	if ((m_log_file = ExtractString(data, "[^#]log_file\\s*=\\s*([\\w\\.]+)")) == "") {
+	if ((m_log_file = ExtractString(data, "[^#]log_file\\s*=\\s*([\\w\\./]+)")) == "") {
 		throw std::runtime_error("Can't find port parameter in config file: " + m_path);
 	}
 	if ((m_fps = ExtractValue(data, "[^#]fps\\s*=\\s*(\\d+)")) == static_cast<unsigned>(-1)) {

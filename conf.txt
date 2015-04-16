@@ -12,4 +12,4 @@ width = 200#480
 auth = admin:fuck_Puck_1991
 auth = user:OppaHello981
 
-log_file = async_log.txt
+log_file = /home/yarr/src/webcam_server/async_log.txt
