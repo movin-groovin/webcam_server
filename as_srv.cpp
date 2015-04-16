@@ -217,7 +217,7 @@ void CConfig::ExtraxtAuthData(const std::string &data) {
 				std::string(reg_res[2].first, reg_res[2].second)
 			)
 		);
-std::cout << "name: " << std::string(reg_res[1].first, reg_res[1].second) << "; pass: " << std::string(reg_res[2].first, reg_res[2].second) << "\n";
+		
 		it = reg_res[0].second;
 		++num;
 	}
@@ -248,13 +248,13 @@ void CConfig::DoRead() {
 	if ((m_log_file = ExtractString(data, "[^#]log_file\\s*=\\s*([\\w\\.]+)")) == "") {
 		throw std::runtime_error("Can't find port parameter in config file: " + m_path);
 	}
-	if ((m_log_file = ExtractString(data, "[^#]fps\\s*=\\s*(\\d+)+)")) == "") {
+	if ((m_fps = ExtractValue(data, "[^#]fps\\s*=\\s*(\\d+)")) == static_cast<unsigned>(-1)) {
 		throw std::runtime_error("Can't find port parameter in config file: " + m_path);
 	}
-	if ((m_log_file = ExtractString(data, "[^#]height\\s*=\\s*(\\d+)")) == "") {
+	if ((m_height = ExtractValue(data, "[^#]height\\s*=\\s*(\\d+)")) == static_cast<unsigned>(-1)) {
 		throw std::runtime_error("Can't find port parameter in config file: " + m_path);
 	}
-	if ((m_log_file = ExtractString(data, "[^#]width\\s*=\\s*(\\d+)")) == "") {
+	if ((m_width = ExtractValue(data, "[^#]width\\s*=\\s*(\\d+)")) == static_cast<unsigned>(-1)) {
 		throw std::runtime_error("Can't find port parameter in config file: " + m_path);
 	}
 	ExtraxtAuthData(data);
@@ -715,8 +715,7 @@ void CTcpConnection::SendAsyncHeader(NetThings::REQUEST_HEADER &hdr) {
 			reinterpret_cast<char*>(&hdr) + sizeof hdr,
 			hdr_buf.begin()
 		);
-std::cout << "hdr.u.s.command: " << hdr.u.s.command << " hdr.u.s.status: " << hdr.u.s.status << " hdr.u.s.extra_status: "<< hdr.u.s.extra_status
-	<< " hdr.u.s.size: "<< hdr.u.s.size << " hdr.u.s.height: "<< hdr.u.s.height << " hdr.u.s.width: "<< hdr.u.s.width << "\n";
+		
 		PreIncNetOperationsNumber();
 		boost::asio::async_write(
 			m_socket,
@@ -801,7 +800,7 @@ bool AdjustSignals() {
 }
 //--------------------------------------------------------------------
 int main(int argc, char *argv[]) {
-	unsigned milisec_sleep = 1000;
+	//unsigned milisec_sleep = 10;
 	unsigned wait_cam_milisec = 1000;
 	unsigned max_sec_wait = 2;
 	unsigned max_count_wait = 10;
@@ -836,8 +835,6 @@ int main(int argc, char *argv[]) {
 			thr_grp.created_threads.push_back(
 				thr_grp.thread_group.create_thread(
 					[&]()->void {
-						std::cout << "Interruption enabled: " << boost::this_thread::interruption_enabled() << " for thread: " <<
-									 boost::this_thread::get_id() << "\n";
 						io_service.run();
 					}
 				)
@@ -869,8 +866,10 @@ int main(int argc, char *argv[]) {
 			} else if (first_cam.IsOPened()) {
 				first_cam.CloseCamera();
 			}
-			
-			boost::this_thread::sleep(boost::posix_time::millisec(milisec_sleep));
+
+			boost::this_thread::sleep(
+				boost::posix_time::millisec(1000 / CConfig::GetConfig().GetFps())
+			);
 			
 			if (duration_clear < (boost::posix_time::second_clock::local_time() - new_clear_period)) {
 				new_clear_period = boost::posix_time::second_clock::local_time();

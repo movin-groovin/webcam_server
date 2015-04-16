@@ -26,27 +26,12 @@ namespace Frames {
 
 
 void CWebcam::GetData(std::vector<char> & dat) {
-#ifdef MY_OWN_DEBUG_1
-	int ret;
-	if (ret = pthread_rwlock_rdlock(&m_rwlock))
-	{
-		throw std::logic_error(ErrorToString(ret));
-	}
-#else
-	pthread_rwlock_rdlock(&m_rwlock);
-#endif
-	
 	if (dat.size() < m_data.size()) {
-		try {
-			dat.resize(m_data.size());
-		} catch (...) {
-			pthread_rwlock_unlock(&m_rwlock);
-			throw;
-		}
+		CRWLockHolderWrite lock(m_rwlock);
+		dat.resize(m_data.size());
 	}
+	CRWLockHolderRead lock(m_rwlock);
 	std::copy(m_data.begin(), m_data.end(), dat.begin());
-	
-	pthread_rwlock_unlock(&m_rwlock);
 	
 	return;
 }

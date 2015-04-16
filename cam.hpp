@@ -45,7 +45,7 @@ private:
 		return frame->rows * frame->cols * frame->channels();
 	}
 	
-	cv::VideoCapture AdjustCamera (size_t height, size_t width, int cam_number) {
+	cv::VideoCapture AdjustCamera (size_t height, size_t width, size_t channels, int cam_number) {
 		cv::VideoCapture cap(cam_number);
 		if(!cap.isOpened()) {
 			std::ostringstream oss;
@@ -56,10 +56,48 @@ private:
 		cap.set (CV_CAP_PROP_FRAME_HEIGHT, height);
 		m_height_frame = cap.get (CV_CAP_PROP_FRAME_HEIGHT);
 		m_width_frame = cap.get (CV_CAP_PROP_FRAME_WIDTH);
-		
+		m_data.resize(height * width * channels);
 		
 		return cap;
 	}
+	
+	struct CRWLockHolderRead: private boost::noncopyable {
+		CRWLockHolderRead(pthread_rwlock_t & ref): ref_rwlock(ref) {
+#ifdef MY_OWN_DEBUG_1
+			int ret;
+			if (ret = pthread_rwlock_rdlock(&ref_rwlock);)
+			{
+				throw std::logic_error(ErrorToString(ret));
+			}
+#else
+			pthread_rwlock_rdlock(&ref_rwlock);
+#endif
+		}
+		~CRWLockHolderRead() {
+			pthread_rwlock_unlock(&ref_rwlock);
+		}
+		private:
+			pthread_rwlock_t & ref_rwlock;
+	};
+	
+	struct CRWLockHolderWrite: private boost::noncopyable {
+		CRWLockHolderWrite(pthread_rwlock_t & ref): ref_rwlock(ref) {
+#ifdef MY_OWN_DEBUG_1
+			int ret;
+			if (ret = pthread_rwlock_wrlock(&ref_rwlock);)
+			{
+				throw std::logic_error(ErrorToString(ret));
+			}
+#else
+			pthread_rwlock_wrlock(&ref_rwlock);
+#endif
+		}
+		~CRWLockHolderWrite() {
+			pthread_rwlock_unlock(&ref_rwlock);
+		}
+		private:
+			pthread_rwlock_t & ref_rwlock;
+	};
 	
 public:
 	virtual ~CWebcam() {
@@ -70,7 +108,7 @@ public:
 		m_data(height * width * channels),
 		m_channels(channels),
 		m_cam_number(cam_number),
-		m_cap(AdjustCamera(height, width, cam_number))
+		m_cap(AdjustCamera(height, width, channels, cam_number))
 	{
 		int ret;
 		if ((ret = pthread_rwlock_init(&m_rwlock, nullptr))) {
@@ -81,6 +119,7 @@ public:
 	}
 	
 	bool CloseCamera() {
+		CRWLockHolderWrite lock(m_rwlock);
 		m_cap.release();
 		return true;
 	}
@@ -90,8 +129,9 @@ public:
 	}
 	
 	bool OpenCamera () {
+		CRWLockHolderWrite lock(m_rwlock);
 		try {
-			m_cap = AdjustCamera(m_height_frame, m_width_frame, m_cam_number);
+			m_cap = AdjustCamera(m_height_frame, m_width_frame, m_channels, m_cam_number);
 		} catch (std::exception & Exc) {
 			// WriteToLog("Can't open camera, " + Exc.what());
 			return false;
@@ -100,22 +140,16 @@ public:
 	}
 
 	void RefreshFrame() {
+		CRWLockHolderWrite lock(m_rwlock);
 		cv::Mat frame;
 		
 		m_cap >> frame; // get a new frame from camera
 		cv::Mat new_frame (MakeLinear(frame));
-		
-#ifdef MY_OWN_DEBUG_1
-		int ret;
-		if (ret = pthread_rwlock_wrlock(&m_rwlock))
-		{
-			throw std::logic_error(ErrorToString(ret));
-		}
-#else
-		pthread_rwlock_wrlock(&m_rwlock);
-#endif
 		std::copy_n(new_frame.data, GetMatSize(&new_frame), m_data.begin());
-		pthread_rwlock_unlock(&m_rwlock);
+		/*auto iter = m_data.begin();
+		for (int i = 0; i < GetMatSize(&new_frame); ++i, ++iter) {
+			*iter = new_frame.data[i];
+		}*/
 		
 		return;
 	}
@@ -128,7 +162,7 @@ public:
 private:
 	std::vector<char> m_data;
 	
-	pthread_rwlock_t m_rwlock;
+	mutable pthread_rwlock_t m_rwlock;
 	
 	size_t m_height_frame;
 	size_t m_width_frame;
