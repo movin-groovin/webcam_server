@@ -7,3 +7,11 @@ net_srv
 *.pro.user
 s_cln
 as_srv
+async_log.txt
+file.txt
+old/
+srv.tar.gz
+srv/
+webcam_unit_tests/Makefile
+#webcam_unit_tests/sources/
+webcam_unit_tests/utests
