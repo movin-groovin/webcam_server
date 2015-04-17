@@ -32,6 +32,7 @@ def main ():
 	elif pid == 0:
 		# child	process"
 		os.setsid ()
+		os.umask(0)
 		try:
 			for i in xrange (1024):
 				os.close (i)

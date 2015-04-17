@@ -14,11 +14,11 @@ LFLAGS += -lboost_regex-gcc47-mt-1_57 -lopencv_highgui -lopencv_core -lopencv_im
 
 all: as_srv s_cln
 
-as_srv: as_srv.o cam.o net.o
-	$(CC) $(LFLAGS) as_srv.o cam.o net.o -o as_srv
+as_srv: as_srv.o cam.o net.o main_server.o
+	$(CC) $(LFLAGS) as_srv.o cam.o net.o main_server.o -o as_srv
 
-s_cln: s_cln.o cam.o net.o
-	$(CC) $(LFLAGS) s_cln.o cam.o net.o -o s_cln
+s_cln: s_cln.o cam.o net.o main_client.o
+	$(CC) $(LFLAGS) s_cln.o cam.o net.o main_client.o -o s_cln
 
 as_srv.o: as_srv.cpp net.hpp cam.hpp
 	$(CC) $(CFLAGS) as_srv.cpp
@@ -31,6 +31,12 @@ s_cln.o: s_cln.cpp net.hpp cam.hpp
 
 net.o: net.cpp net.hpp
 	$(CC) $(CFLAGS) net.cpp
+	
+main_server.o: main_server.cpp
+	$(CC) $(CFLAGS) main_server.cpp
+	
+main_client.o: main_client.cpp
+	$(CC) $(CFLAGS) main_client.cpp
 
 clean:
 	rm -rf *.o

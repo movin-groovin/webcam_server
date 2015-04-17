@@ -799,7 +799,7 @@ bool AdjustSignals() {
 	return true;
 }
 //--------------------------------------------------------------------
-int main(int argc, char *argv[]) {
+int EntryPointServer(int argc, char *argv[]) {
 	//unsigned milisec_sleep = 10;
 	unsigned wait_cam_milisec = 1000;
 	unsigned max_sec_wait = 2;

@@ -121,7 +121,7 @@ bool RecvAuthData (boost::asio::ip::tcp::socket &sock, std::vector<char> extra_d
 }
 
 
-int main(int argc, char* argv[]) {
+int EntryPointClient(int argc, char* argv[]) {
 	try {
 		if (argc < 4) {
 			std::cerr << "Usage: client <host> <port> <username:password>\n" << std::endl;
